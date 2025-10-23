@@ -12,7 +12,7 @@
     "Hunting Queries": [],
     "Playbooks": [],
     "BasePath": "C:\\Github\\Azure-Sentinel\\Solutions\\Halcyon",
-    "Version": "1.0.0",
+    "Version": "3.3.0",
     "Metadata": "SolutionMetadata.json",
     "TemplateSpec": true,
     "Is1PConnector": false

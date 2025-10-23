@@ -1,6 +1,6 @@
 {
-    "name": "Halcyon",
-    "apiVersion": "2022-09-01-preview",
+    "name": "HalcyonPush",
+    "apiVersion": "2025-09-01",
     "type": "Microsoft.SecurityInsights/dataConnectorDefinitions",
     "location": "[parameters('workspace-location')]",
     "kind": "Customizable",
@@ -9,13 +9,34 @@
         "id": "HalcyonPush",
         "title": "Halcyon Push Connector",
         "publisher": "Halcyon",
+        "logo": "halcyon.svg",
         "descriptionMarkdown": "The [Halcyon](https://www.halcyon.ai) connector provides the capability to read data from Halcyon in Microsoft Sentinel.",
-        "graphQueries": [],
-        "sampleQueries": [],
-        "dataTypes": [],
-        "connectivityCriteria": [],
+        "graphQueries": [
+          {
+            "metricName": "Events",
+            "legend": "HalcyonLogs_CL",
+            "baseQuery": "HalcyonLogs_CL"
+          }
+        ],
+        "sampleQueries": [
+          {
+            "description": "Get Sample Events",
+            "query": "HalcyonLogs_CL\n | take 10"
+          }
+        ],
+        "dataTypes": [
+          {
+            "name": "Halcyon Events",
+            "lastDataReceivedQuery": "HalcyonLogs_CL\n | summarize Time = max(TimeGenerated)\n | where isnotempty(Time)"
+          }
+        ],
+        "connectivityCriteria": [
+          {
+            "type": "HasDataConnectors"
+          }
+        ],
         "availability": {
-          "status": 1
+          "isPreview": true
         },
         "permissions": {
           "resourceProvider": [

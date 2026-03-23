@@ -19,7 +19,6 @@
   "Playbooks": [],
   "BasePath": "C:\\Github\\Azure-Sentinel\\Solutions\\Halcyon",
   "Version": "3.1.0",
-  "DataConnectorCCFVersion": "1.0.0",
   "Metadata": "SolutionMetadata.json",
   "TemplateSpec": true,
   "Is1PConnector": false

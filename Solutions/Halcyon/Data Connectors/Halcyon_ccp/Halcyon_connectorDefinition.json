@@ -160,6 +160,26 @@
                 "type": "CopyableLabel"
               }
             ]
+          },
+          {
+            "title": "3. Manage connection",
+            "description": "Delete the connector to re-enable the Deploy button and reconfigure credentials.",
+            "instructions": [
+              {
+                "type": "DataConnectorsGrid",
+                "parameters": {
+                  "mapping": [
+                    {
+                      "columnName": "Application ID",
+                      "columnValue": "properties.auth.appId"
+                    }
+                  ],
+                  "menuItems": [
+                    "DeleteConnector"
+                  ]
+                }
+              }
+            ]
           }
         ]
       }

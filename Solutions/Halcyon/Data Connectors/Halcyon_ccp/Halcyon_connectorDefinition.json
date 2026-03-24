@@ -18,32 +18,6 @@
             "baseQuery": "HalcyonEvents_CL"
           }
         ],
-        "sampleQueries": [
-          {
-            "description": "Get sample events",
-            "query": "HalcyonEvents_CL\n | take 10"
-          },
-          {
-            "description": "Get sample authentication events",
-            "query": "HalcyonEvents_CL\n | where class_uid == 3002\n | take 10"
-          },
-          {
-            "description": "Get sample DNS activity",
-            "query": "HalcyonEvents_CL\n | where class_uid == 4003\n | take 10"
-          },
-          {
-            "description": "Get sample file activity",
-            "query": "HalcyonEvents_CL\n | where class_uid == 1001\n | take 10"
-          },
-          {
-            "description": "Get sample network activity",
-            "query": "HalcyonEvents_CL\n | where class_uid == 4001\n | take 10"
-          },
-          {
-            "description": "Get sample process activity",
-            "query": "HalcyonEvents_CL\n | where class_uid == 1007\n | take 10"
-          }
-        ],
         "dataTypes": [
           {
             "name": "Halcyon Events",
@@ -54,7 +28,7 @@
           {
             "type": "IsConnectedQuery",
             "value": [
-              "HalcyonEvents_CL | summarize LastLogReceived = max(TimeGenerated) | project IsConnected = LastLogReceived > ago(30d)"
+              "HalcyonEvents_CL | summarize LastLogReceived = max(TimeGenerated) | project IsConnected = LastLogReceived > ago(7d)"
             ]
           }
         ],
@@ -100,14 +74,14 @@
               {
                 "parameters": {
                   "label": "Deploy Halcyon Connector Resources",
-                  "applicationDisplayName": "Halcyon Connector Application"
+                  "applicationDisplayName": "Halcyon Sentinel Connector"
                 },
                 "type": "DeployPushConnectorButton"
               }
             ]
           },
           {
-            "title": "2. Configured your integration in the Halcyon Platform",
+            "title": "2. Configure your integration in the Halcyon Platform",
             "description": "Use the following parameters to configure your integration in the Halcyon Platform.",
             "instructions": [
               {
@@ -151,33 +125,13 @@
               },
               {
                 "parameters": {
-                  "label": "Data Collection Rule Immutable ID (Rule ID)",
+                  "label": "Data Collection Rule ID (Rule ID)",
                   "fillWith": [
                     "DataCollectionRuleId"
                   ],
                   "placeholder": "Deploy the Push Connector to get the Data Collection Rule ID"
                 },
                 "type": "CopyableLabel"
-              }
-            ]
-          },
-          {
-            "title": "3. Manage connection",
-            "description": "Delete the connector to re-enable the Deploy button and reconfigure credentials.",
-            "instructions": [
-              {
-                "type": "DataConnectorsGrid",
-                "parameters": {
-                  "mapping": [
-                    {
-                      "columnName": "Application ID",
-                      "columnValue": "properties.auth.appId"
-                    }
-                  ],
-                  "menuItems": [
-                    "DeleteConnector"
-                  ]
-                }
               }
             ]
           }

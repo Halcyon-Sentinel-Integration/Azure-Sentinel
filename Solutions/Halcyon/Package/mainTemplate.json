@@ -132,32 +132,6 @@
                       "baseQuery": "HalcyonEvents_CL"
                     }
                   ],
-                  "sampleQueries": [
-                    {
-                      "description": "Get sample events",
-                      "query": "HalcyonEvents_CL\n | take 10"
-                    },
-                    {
-                      "description": "Get sample authentication events",
-                      "query": "HalcyonEvents_CL\n | where class_uid == 3002\n | take 10"
-                    },
-                    {
-                      "description": "Get sample DNS activity",
-                      "query": "HalcyonEvents_CL\n | where class_uid == 4003\n | take 10"
-                    },
-                    {
-                      "description": "Get sample file activity",
-                      "query": "HalcyonEvents_CL\n | where class_uid == 1001\n | take 10"
-                    },
-                    {
-                      "description": "Get sample network activity",
-                      "query": "HalcyonEvents_CL\n | where class_uid == 4001\n | take 10"
-                    },
-                    {
-                      "description": "Get sample process activity",
-                      "query": "HalcyonEvents_CL\n | where class_uid == 1007\n | take 10"
-                    }
-                  ],
                   "dataTypes": [
                     {
                       "name": "Halcyon Events",
@@ -168,7 +142,7 @@
                     {
                       "type": "IsConnectedQuery",
                       "value": [
-                        "HalcyonEvents_CL | summarize LastLogReceived = max(TimeGenerated) | project IsConnected = LastLogReceived > ago(30d)"
+                        "HalcyonEvents_CL | summarize LastLogReceived = max(TimeGenerated) | project IsConnected = LastLogReceived > ago(7d)"
                       ]
                     }
                   ],
@@ -214,14 +188,14 @@
                         {
                           "parameters": {
                             "label": "Deploy Halcyon Connector Resources",
-                            "applicationDisplayName": "Halcyon Connector Application"
+                            "applicationDisplayName": "Halcyon Sentinel Connector"
                           },
                           "type": "DeployPushConnectorButton"
                         }
                       ]
                     },
                     {
-                      "title": "2. Configured your integration in the Halcyon Platform",
+                      "title": "2. Configure your integration in the Halcyon Platform",
                       "description": "Use the following parameters to configure your integration in the Halcyon Platform.",
                       "instructions": [
                         {
@@ -265,33 +239,13 @@
                         },
                         {
                           "parameters": {
-                            "label": "Data Collection Rule Immutable ID (Rule ID)",
+                            "label": "Data Collection Rule ID (Rule ID)",
                             "fillWith": [
                               "DataCollectionRuleId"
                             ],
                             "placeholder": "Deploy the Push Connector to get the Data Collection Rule ID"
                           },
                           "type": "CopyableLabel"
-                        }
-                      ]
-                    },
-                    {
-                      "title": "3. Manage connection",
-                      "description": "Delete the connector to re-enable the Deploy button and reconfigure credentials.",
-                      "instructions": [
-                        {
-                          "type": "DataConnectorsGrid",
-                          "parameters": {
-                            "mapping": [
-                              {
-                                "columnName": "Application ID",
-                                "columnValue": "properties.auth.appId"
-                              }
-                            ],
-                            "menuItems": [
-                              "DeleteConnector"
-                            ]
-                          }
                         }
                       ]
                     }
@@ -699,32 +653,6 @@
               "baseQuery": "HalcyonEvents_CL"
             }
           ],
-          "sampleQueries": [
-            {
-              "description": "Get sample events",
-              "query": "HalcyonEvents_CL\n | take 10"
-            },
-            {
-              "description": "Get sample authentication events",
-              "query": "HalcyonEvents_CL\n | where class_uid == 3002\n | take 10"
-            },
-            {
-              "description": "Get sample DNS activity",
-              "query": "HalcyonEvents_CL\n | where class_uid == 4003\n | take 10"
-            },
-            {
-              "description": "Get sample file activity",
-              "query": "HalcyonEvents_CL\n | where class_uid == 1001\n | take 10"
-            },
-            {
-              "description": "Get sample network activity",
-              "query": "HalcyonEvents_CL\n | where class_uid == 4001\n | take 10"
-            },
-            {
-              "description": "Get sample process activity",
-              "query": "HalcyonEvents_CL\n | where class_uid == 1007\n | take 10"
-            }
-          ],
           "dataTypes": [
             {
               "name": "Halcyon Events",
@@ -735,7 +663,7 @@
             {
               "type": "IsConnectedQuery",
               "value": [
-                "HalcyonEvents_CL | summarize LastLogReceived = max(TimeGenerated) | project IsConnected = LastLogReceived > ago(30d)"
+                "HalcyonEvents_CL | summarize LastLogReceived = max(TimeGenerated) | project IsConnected = LastLogReceived > ago(7d)"
               ]
             }
           ],
@@ -781,14 +709,14 @@
                 {
                   "parameters": {
                     "label": "Deploy Halcyon Connector Resources",
-                    "applicationDisplayName": "Halcyon Connector Application"
+                    "applicationDisplayName": "Halcyon Sentinel Connector"
                   },
                   "type": "DeployPushConnectorButton"
                 }
               ]
             },
             {
-              "title": "2. Configured your integration in the Halcyon Platform",
+              "title": "2. Configure your integration in the Halcyon Platform",
               "description": "Use the following parameters to configure your integration in the Halcyon Platform.",
               "instructions": [
                 {
@@ -832,33 +760,13 @@
                 },
                 {
                   "parameters": {
-                    "label": "Data Collection Rule Immutable ID (Rule ID)",
+                    "label": "Data Collection Rule ID (Rule ID)",
                     "fillWith": [
                       "DataCollectionRuleId"
                     ],
                     "placeholder": "Deploy the Push Connector to get the Data Collection Rule ID"
                   },
                   "type": "CopyableLabel"
-                }
-              ]
-            },
-            {
-              "title": "3. Manage connection",
-              "description": "Delete the connector to re-enable the Deploy button and reconfigure credentials.",
-              "instructions": [
-                {
-                  "type": "DataConnectorsGrid",
-                  "parameters": {
-                    "mapping": [
-                      {
-                        "columnName": "Application ID",
-                        "columnValue": "properties.auth.appId"
-                      }
-                    ],
-                    "menuItems": [
-                      "DeleteConnector"
-                    ]
-                  }
                 }
               ]
             }
@@ -1734,7 +1642,7 @@
           ]
         },
         "firstPublishDate": "2025-12-22",
-        "lastPublishDate": "2026-03-22",
+        "lastPublishDate": "2026-03-24",
         "providers": [
           "Halcyon"
         ],
@@ -1745,404 +1653,6 @@
         }
       },
       "name": "[concat(parameters('workspace'),'/Microsoft.SecurityInsights/', variables('_solutionId'))]"
-    },
-    {
-      "type": "Microsoft.Resources/deployments",
-      "apiVersion": "2025-04-01",
-      "name": "HalcyonInfrastructureDeployment",
-      "dependsOn": [
-        "[resourceId('Microsoft.OperationalInsights/workspaces/tables', parameters('workspace'), 'HalcyonEvents_CL')]"
-      ],
-      "properties": {
-        "mode": "Incremental",
-        "expressionEvaluationOptions": {
-          "scope": "inner"
-        },
-        "parameters": {
-          "workspaceCustomerId": {
-            "value": "[reference(resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspace')), '2025-07-01').customerId]"
-          },
-          "workspaceLocation": {
-            "value": "[parameters('workspace-location')]"
-          },
-          "workspaceResourceId": {
-            "value": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspace'))]"
-          },
-          "subscription": {
-            "value": "[parameters('subscription')]"
-          },
-          "resourceGroupName": {
-            "value": "[parameters('resourceGroupName')]"
-          }
-        },
-        "template": {
-          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-          "contentVersion": "1.0.0.0",
-          "parameters": {
-            "workspaceCustomerId": {
-              "type": "string"
-            },
-            "workspaceLocation": {
-              "type": "string"
-            },
-            "workspaceResourceId": {
-              "type": "string"
-            },
-            "subscription": {
-              "type": "string"
-            },
-            "resourceGroupName": {
-              "type": "string"
-            }
-          },
-          "resources": [
-            {
-              "type": "Microsoft.Insights/dataCollectionEndpoints",
-              "apiVersion": "2024-03-11",
-              "name": "[concat('ASI-', parameters('workspaceCustomerId'))]",
-              "location": "[parameters('workspaceLocation')]",
-              "properties": {}
-            },
-            {
-              "type": "Microsoft.Insights/dataCollectionRules",
-              "apiVersion": "2024-03-11",
-              "name": "[concat('Microsoft-Sentinel-HalcyonDCR-', substring(parameters('workspaceCustomerId'), 0, 12))]",
-              "location": "[parameters('workspaceLocation')]",
-              "properties": {
-                "dataCollectionEndpointId": "[resourceId('Microsoft.Insights/dataCollectionEndpoints', concat('ASI-', parameters('workspaceCustomerId')))]",
-                "streamDeclarations": {
-                  "Custom-Halcyon": {
-                    "columns": [
-                      {
-                        "name": "TimeGenerated",
-                        "type": "datetime"
-                      },
-                      {
-                        "name": "activity_id",
-                        "type": "int"
-                      },
-                      {
-                        "name": "activity_name",
-                        "type": "string"
-                      },
-                      {
-                        "name": "category_uid",
-                        "type": "int"
-                      },
-                      {
-                        "name": "category_name",
-                        "type": "string"
-                      },
-                      {
-                        "name": "class_uid",
-                        "type": "int"
-                      },
-                      {
-                        "name": "class_name",
-                        "type": "string"
-                      },
-                      {
-                        "name": "severity_id",
-                        "type": "int"
-                      },
-                      {
-                        "name": "severity",
-                        "type": "string"
-                      },
-                      {
-                        "name": "time",
-                        "type": "long"
-                      },
-                      {
-                        "name": "type_uid",
-                        "type": "long"
-                      },
-                      {
-                        "name": "type_name",
-                        "type": "string"
-                      },
-                      {
-                        "name": "message",
-                        "type": "string"
-                      },
-                      {
-                        "name": "raw_data",
-                        "type": "string"
-                      },
-                      {
-                        "name": "status_id",
-                        "type": "int"
-                      },
-                      {
-                        "name": "status",
-                        "type": "string"
-                      },
-                      {
-                        "name": "action_id",
-                        "type": "int"
-                      },
-                      {
-                        "name": "action",
-                        "type": "string"
-                      },
-                      {
-                        "name": "disposition_id",
-                        "type": "int"
-                      },
-                      {
-                        "name": "disposition",
-                        "type": "string"
-                      },
-                      {
-                        "name": "rcode",
-                        "type": "string"
-                      },
-                      {
-                        "name": "rcode_id",
-                        "type": "int"
-                      },
-                      {
-                        "name": "metadata",
-                        "type": "dynamic"
-                      },
-                      {
-                        "name": "unmapped",
-                        "type": "dynamic"
-                      },
-                      {
-                        "name": "actor",
-                        "type": "dynamic"
-                      },
-                      {
-                        "name": "device",
-                        "type": "dynamic"
-                      },
-                      {
-                        "name": "file",
-                        "type": "dynamic"
-                      },
-                      {
-                        "name": "process",
-                        "type": "dynamic"
-                      },
-                      {
-                        "name": "user",
-                        "type": "dynamic"
-                      },
-                      {
-                        "name": "dst_endpoint",
-                        "type": "dynamic"
-                      },
-                      {
-                        "name": "src_endpoint",
-                        "type": "dynamic"
-                      },
-                      {
-                        "name": "query",
-                        "type": "dynamic"
-                      },
-                      {
-                        "name": "answers",
-                        "type": "dynamic"
-                      },
-                      {
-                        "name": "driver",
-                        "type": "dynamic"
-                      },
-                      {
-                        "name": "module",
-                        "type": "dynamic"
-                      },
-                      {
-                        "name": "app",
-                        "type": "dynamic"
-                      }
-                    ]
-                  }
-                },
-                "destinations": {
-                  "logAnalytics": [
-                    {
-                      "workspaceResourceId": "[parameters('workspaceResourceId')]",
-                      "name": "clv2ws1"
-                    }
-                  ]
-                },
-                "dataFlows": [
-                  {
-                    "streams": [
-                      "Custom-Halcyon"
-                    ],
-                    "destinations": [
-                      "clv2ws1"
-                    ],
-                    "transformKql": "source | extend TimeGenerated = datetime(1970-01-01) + (['time'] * 1ms) | project-away ['time']",
-                    "outputStream": "Custom-HalcyonEvents_CL"
-                  }
-                ]
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Insights/dataCollectionEndpoints', concat('ASI-', parameters('workspaceCustomerId')))]"
-              ]
-            }
-          ]
-        }
-      }
-    },
-    {
-      "type": "Microsoft.OperationalInsights/workspaces/tables",
-      "apiVersion": "2025-07-01",
-      "name": "[concat(parameters('workspace'), '/HalcyonEvents_CL')]",
-      "location": "[parameters('workspace-location')]",
-      "tags": {},
-      "properties": {
-        "plan": "Analytics",
-        "schema": {
-          "name": "HalcyonEvents_CL",
-          "columns": [
-            {
-              "name": "TimeGenerated",
-              "type": "datetime"
-            },
-            {
-              "name": "activity_id",
-              "type": "int"
-            },
-            {
-              "name": "activity_name",
-              "type": "string"
-            },
-            {
-              "name": "category_uid",
-              "type": "int"
-            },
-            {
-              "name": "category_name",
-              "type": "string"
-            },
-            {
-              "name": "class_uid",
-              "type": "int"
-            },
-            {
-              "name": "class_name",
-              "type": "string"
-            },
-            {
-              "name": "severity_id",
-              "type": "int"
-            },
-            {
-              "name": "severity",
-              "type": "string"
-            },
-            {
-              "name": "type_uid",
-              "type": "long"
-            },
-            {
-              "name": "type_name",
-              "type": "string"
-            },
-            {
-              "name": "message",
-              "type": "string"
-            },
-            {
-              "name": "raw_data",
-              "type": "string"
-            },
-            {
-              "name": "status_id",
-              "type": "int"
-            },
-            {
-              "name": "status",
-              "type": "string"
-            },
-            {
-              "name": "action_id",
-              "type": "int"
-            },
-            {
-              "name": "action",
-              "type": "string"
-            },
-            {
-              "name": "disposition_id",
-              "type": "int"
-            },
-            {
-              "name": "disposition",
-              "type": "string"
-            },
-            {
-              "name": "rcode",
-              "type": "string"
-            },
-            {
-              "name": "rcode_id",
-              "type": "int"
-            },
-            {
-              "name": "metadata",
-              "type": "dynamic"
-            },
-            {
-              "name": "unmapped",
-              "type": "dynamic"
-            },
-            {
-              "name": "actor",
-              "type": "dynamic"
-            },
-            {
-              "name": "device",
-              "type": "dynamic"
-            },
-            {
-              "name": "file",
-              "type": "dynamic"
-            },
-            {
-              "name": "process",
-              "type": "dynamic"
-            },
-            {
-              "name": "user",
-              "type": "dynamic"
-            },
-            {
-              "name": "dst_endpoint",
-              "type": "dynamic"
-            },
-            {
-              "name": "src_endpoint",
-              "type": "dynamic"
-            },
-            {
-              "name": "query",
-              "type": "dynamic"
-            },
-            {
-              "name": "answers",
-              "type": "dynamic"
-            },
-            {
-              "name": "driver",
-              "type": "dynamic"
-            },
-            {
-              "name": "module",
-              "type": "dynamic"
-            },
-            {
-              "name": "app",
-              "type": "dynamic"
-            }
-          ]
-        }
-      }
     }
   ],
   "outputs": {}

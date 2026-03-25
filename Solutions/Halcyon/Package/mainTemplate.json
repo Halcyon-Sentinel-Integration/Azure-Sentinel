@@ -125,6 +125,7 @@
                   "publisher": "Halcyon",
                   "logo": "halcyon.svg",
                   "descriptionMarkdown": "The [Halcyon](https://www.halcyon.ai) connector provides the capability to send data from Halcyon to Microsoft Sentinel.",
+                  "sampleQueries": [],
                   "graphQueries": [
                     {
                       "metricName": "Events",
@@ -646,6 +647,7 @@
           "publisher": "Halcyon",
           "logo": "halcyon.svg",
           "descriptionMarkdown": "The [Halcyon](https://www.halcyon.ai) connector provides the capability to send data from Halcyon to Microsoft Sentinel.",
+          "sampleQueries": [],
           "graphQueries": [
             {
               "metricName": "Events",

@@ -1,0 +1,346 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "metadata": {
+        "title": "Halcyon-IncidentUpdate",
+        "description": "Scheduled playbook that keeps open Halcyon Sentinel incidents in sync with the latest Halcyon alert states. Updates incident labels with current triage/display status and appends new notes as comments.",
+        "prerequisites": [
+            "1. The Halcyon data connector must be deployed and ingesting data into Halcyon_Commands_CL.",
+            "2. The HalcyonTriggersRule analytics rule and companion automation rule must be deployed.",
+            "3. The deploying principal must have permission to create role assignments on the Log Analytics workspace."
+        ],
+        "tags": ["Sync", "Halcyon"],
+        "author": { "name": "Halcyon" },
+        "support": { "tier": "developer", "link": "https://www.halcyon.ai" }
+    },
+    "parameters": {
+        "PlaybookName": {
+            "type": "string",
+            "defaultValue": "Halcyon-IncidentUpdate"
+        },
+        "WorkspaceName": {
+            "type": "string",
+            "metadata": { "description": "Name of the Log Analytics workspace containing Halcyon_Commands_CL and Microsoft Sentinel." }
+        },
+        "WorkspaceId": {
+            "type": "string",
+            "metadata": { "description": "GUID of the Log Analytics workspace (found in workspace Properties)." }
+        },
+        "SubscriptionId": {
+            "type": "string",
+            "defaultValue": "[subscription().subscriptionId]"
+        },
+        "ResourceGroupName": {
+            "type": "string",
+            "defaultValue": "[resourceGroup().name]"
+        },
+        "RecurrenceInterval": {
+            "type": "int",
+            "defaultValue": 5,
+            "metadata": { "description": "How often to run the sync, in units of RecurrenceFrequency." }
+        },
+        "RecurrenceFrequency": {
+            "type": "string",
+            "defaultValue": "Minute",
+            "allowedValues": ["Minute", "Hour"]
+        }
+    },
+    "variables": {
+        "sentinelResponderRoleId": "3e150937-b8fe-4cfb-8069-0eaf05ecd056",
+        "logAnalyticsReaderRoleId": "73c42c96-874c-492b-b04d-ab87d138a893"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[parameters('PlaybookName')]",
+            "location": "[resourceGroup().location]",
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "properties": {
+                "state": "Enabled",
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "workspaceId": {
+                            "type": "string",
+                            "defaultValue": "[parameters('WorkspaceId')]"
+                        },
+                        "subscriptionId": {
+                            "type": "string",
+                            "defaultValue": "[parameters('SubscriptionId')]"
+                        },
+                        "resourceGroupName": {
+                            "type": "string",
+                            "defaultValue": "[parameters('ResourceGroupName')]"
+                        },
+                        "workspaceName": {
+                            "type": "string",
+                            "defaultValue": "[parameters('WorkspaceName')]"
+                        }
+                    },
+                    "triggers": {
+                        "Recurrence": {
+                            "type": "Recurrence",
+                            "recurrence": {
+                                "frequency": "[parameters('RecurrenceFrequency')]",
+                                "interval": "[parameters('RecurrenceInterval')]"
+                            }
+                        }
+                    },
+                    "actions": {
+                        "Run_KQL_Query": {
+                            "type": "Http",
+                            "runAfter": {},
+                            "inputs": {
+                                "method": "POST",
+                                "uri": "https://api.loganalytics.io/v1/workspaces/@{parameters('workspaceId')}/query",
+                                "headers": {
+                                    "Content-Type": "application/json"
+                                },
+                                "body": {
+                                    "query": "let LatestCommands = materialize(\n    Halcyon_Commands_CL\n    | where TimeGenerated > ago(15m)\n    | summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n    | project HalcyonAlertId, HalcyonTriageStatus, HalcyonDisplayStatus, comment\n);\nSecurityIncident\n| where Labels has_cs \"Halcyon\"\n| summarize arg_max(TimeGenerated, *) by IncidentNumber\n| where Status != \"Closed\"\n| mv-expand AlertIds to typeof(string)\n| join kind=inner (\n    SecurityAlert\n    | where AlertName has \"Halcyon\"\n    | extend HalcyonAlertId = tostring(ExtendedProperties[\"HalcyonAlertId\"])\n    | where isnotempty(HalcyonAlertId)\n    | where HalcyonAlertId in (LatestCommands | project HalcyonAlertId)\n    | project SystemAlertId, HalcyonAlertId\n) on $left.AlertIds == $right.SystemAlertId\n| join kind=inner LatestCommands on HalcyonAlertId\n| extend IncidentId = tostring(split(IncidentName, '/')[2])\n| project IncidentId, HalcyonAlertId, HalcyonTriageStatus, HalcyonDisplayStatus, comment"
+                                },
+                                "authentication": {
+                                    "type": "ManagedServiceIdentity",
+                                    "audience": "https://api.loganalytics.io"
+                                }
+                            }
+                        },
+                        "Parse_Query_Results": {
+                            "type": "ParseJson",
+                            "runAfter": {
+                                "Run_KQL_Query": ["Succeeded"]
+                            },
+                            "inputs": {
+                                "content": "@body('Run_KQL_Query')",
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "tables": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "columns": { "type": "array" },
+                                                    "rows": { "type": "array" }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "For_Each_Alert": {
+                            "type": "Foreach",
+                            "runAfter": {
+                                "Parse_Query_Results": ["Succeeded"]
+                            },
+                            "foreach": "@body('Parse_Query_Results')?['tables'][0]?['rows']",
+                            "runtimeConfiguration": {
+                                "concurrency": { "repetitions": 1 }
+                            },
+                            "actions": {
+                                "Get_Incident": {
+                                    "type": "Http",
+                                    "runAfter": {},
+                                    "inputs": {
+                                        "method": "GET",
+                                        "uri": "https://management.azure.com/subscriptions/@{parameters('subscriptionId')}/resourceGroups/@{parameters('resourceGroupName')}/providers/Microsoft.OperationalInsights/workspaces/@{parameters('workspaceName')}/providers/Microsoft.SecurityInsights/incidents/@{items('For_Each_Alert')[0]}?api-version=2023-11-01",
+                                        "authentication": {
+                                            "type": "ManagedServiceIdentity",
+                                            "audience": "https://management.azure.com"
+                                        }
+                                    }
+                                },
+                                "List_Comments": {
+                                    "type": "Http",
+                                    "runAfter": {
+                                        "Get_Incident": ["Succeeded"]
+                                    },
+                                    "inputs": {
+                                        "method": "GET",
+                                        "uri": "https://management.azure.com/subscriptions/@{parameters('subscriptionId')}/resourceGroups/@{parameters('resourceGroupName')}/providers/Microsoft.OperationalInsights/workspaces/@{parameters('workspaceName')}/providers/Microsoft.SecurityInsights/incidents/@{items('For_Each_Alert')[0]}/comments?api-version=2023-11-01",
+                                        "authentication": {
+                                            "type": "ManagedServiceIdentity",
+                                            "audience": "https://management.azure.com"
+                                        }
+                                    }
+                                },
+                                "Parse_Comments": {
+                                    "type": "ParseJson",
+                                    "runAfter": {
+                                        "List_Comments": ["Succeeded"]
+                                    },
+                                    "inputs": {
+                                        "content": "@body('List_Comments')",
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "value": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "properties": {
+                                                                "type": "object",
+                                                                "properties": {
+                                                                    "message": { "type": "string" },
+                                                                    "createdTimeUtc": { "type": "string" }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "Filter_Halcyon_Comments": {
+                                    "type": "Query",
+                                    "runAfter": {
+                                        "Parse_Comments": ["Succeeded"]
+                                    },
+                                    "inputs": {
+                                        "from": "@body('Parse_Comments')?['value']",
+                                        "where": "@startsWith(item()?['properties']?['message'], '[Halcyon]')"
+                                    }
+                                },
+                                "Compose_Last_Halcyon_Comment": {
+                                    "type": "Compose",
+                                    "runAfter": {
+                                        "Filter_Halcyon_Comments": ["Succeeded"]
+                                    },
+                                    "inputs": "@if(empty(body('Filter_Halcyon_Comments')), '', last(body('Filter_Halcyon_Comments'))?['properties']?['message'])"
+                                },
+                                "Compose_New_Comment": {
+                                    "type": "Compose",
+                                    "runAfter": {
+                                        "Compose_Last_Halcyon_Comment": ["Succeeded"]
+                                    },
+                                    "inputs": "@if(empty(coalesce(items('For_Each_Alert')[4], '')), '', concat('[Halcyon] ', items('For_Each_Alert')[4]))"
+                                },
+                                "Check_Comment_Changed": {
+                                    "type": "If",
+                                    "runAfter": {
+                                        "Compose_New_Comment": ["Succeeded"]
+                                    },
+                                    "expression": {
+                                        "and": [
+                                            {
+                                                "not": {
+                                                    "empty": ["@outputs('Compose_New_Comment')"]
+                                                }
+                                            },
+                                            {
+                                                "not": {
+                                                    "equals": [
+                                                        "@outputs('Compose_New_Comment')",
+                                                        "@outputs('Compose_Last_Halcyon_Comment')"
+                                                    ]
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    "actions": {
+                                        "Add_Comment": {
+                                            "type": "Http",
+                                            "inputs": {
+                                                "method": "PUT",
+                                                "uri": "https://management.azure.com/subscriptions/@{parameters('subscriptionId')}/resourceGroups/@{parameters('resourceGroupName')}/providers/Microsoft.OperationalInsights/workspaces/@{parameters('workspaceName')}/providers/Microsoft.SecurityInsights/incidents/@{items('For_Each_Alert')[0]}/comments/@{guid()}?api-version=2023-11-01",
+                                                "headers": {
+                                                    "Content-Type": "application/json"
+                                                },
+                                                "body": {
+                                                    "properties": {
+                                                        "message": "@{outputs('Compose_New_Comment')}"
+                                                    }
+                                                },
+                                                "authentication": {
+                                                    "type": "ManagedServiceIdentity",
+                                                    "audience": "https://management.azure.com"
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "else": {
+                                        "actions": {}
+                                    }
+                                },
+                                "Compose_Labels": {
+                                    "type": "Compose",
+                                    "runAfter": {
+                                        "Check_Comment_Changed": ["Succeeded"]
+                                    },
+                                    "inputs": "@union(createArray(createObject('labelName', 'Halcyon')), if(empty(coalesce(items('For_Each_Alert')[2], '')), createArray(), createArray(createObject('labelName', string(items('For_Each_Alert')[2])))), if(empty(coalesce(items('For_Each_Alert')[3], '')), createArray(), createArray(createObject('labelName', string(items('For_Each_Alert')[3])))))"
+                                },
+                                "Update_Incident": {
+                                    "type": "Http",
+                                    "runAfter": {
+                                        "Compose_Labels": ["Succeeded"]
+                                    },
+                                    "inputs": {
+                                        "method": "PUT",
+                                        "uri": "https://management.azure.com/subscriptions/@{parameters('subscriptionId')}/resourceGroups/@{parameters('resourceGroupName')}/providers/Microsoft.OperationalInsights/workspaces/@{parameters('workspaceName')}/providers/Microsoft.SecurityInsights/incidents/@{items('For_Each_Alert')[0]}?api-version=2023-11-01",
+                                        "headers": {
+                                            "Content-Type": "application/json",
+                                            "If-Match": "@body('Get_Incident')?['etag']"
+                                        },
+                                        "body": {
+                                            "etag": "@body('Get_Incident')?['etag']",
+                                            "properties": {
+                                                "title": "@body('Get_Incident')?['properties']?['title']",
+                                                "status": "@body('Get_Incident')?['properties']?['status']",
+                                                "severity": "@body('Get_Incident')?['properties']?['severity']",
+                                                "description": "@body('Get_Incident')?['properties']?['description']",
+                                                "owner": "@body('Get_Incident')?['properties']?['owner']",
+                                                "classification": "@body('Get_Incident')?['properties']?['classification']",
+                                                "classificationComment": "@body('Get_Incident')?['properties']?['classificationComment']",
+                                                "classificationReason": "@body('Get_Incident')?['properties']?['classificationReason']",
+                                                "labels": "@outputs('Compose_Labels')"
+                                            }
+                                        },
+                                        "authentication": {
+                                            "type": "ManagedServiceIdentity",
+                                            "audience": "https://management.azure.com"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName')), resourceId('Microsoft.Logic/workflows', parameters('PlaybookName')), variables('sentinelResponderRoleId'))]",
+            "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Logic/workflows', parameters('PlaybookName'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('sentinelResponderRoleId'))]",
+                "principalId": "[reference(resourceId('Microsoft.Logic/workflows', parameters('PlaybookName')), '2017-07-01', 'Full').identity.principalId]",
+                "principalType": "ServicePrincipal"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName')), resourceId('Microsoft.Logic/workflows', parameters('PlaybookName')), variables('logAnalyticsReaderRoleId'))]",
+            "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Logic/workflows', parameters('PlaybookName'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('logAnalyticsReaderRoleId'))]",
+                "principalId": "[reference(resourceId('Microsoft.Logic/workflows', parameters('PlaybookName')), '2017-07-01', 'Full').identity.principalId]",
+                "principalType": "ServicePrincipal"
+            }
+        }
+    ]
+}

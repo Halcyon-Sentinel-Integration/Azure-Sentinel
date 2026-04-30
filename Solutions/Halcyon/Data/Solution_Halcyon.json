@@ -12,7 +12,9 @@
     "Analytics Rules/HalcyonTriggersRule.json"
   ],
   "Hunting Queries": [],
-  "Playbooks": [],
+  "Playbooks": [
+    "Playbooks/Halcyon-IncidentUpdate/azuredeploy.json"
+  ],
   "BasePath": "C:\\GitHub\\Azure-Sentinel\\Solutions\\Halcyon",
   "Version": "3.1.0",
   "Metadata": "SolutionMetadata.json",

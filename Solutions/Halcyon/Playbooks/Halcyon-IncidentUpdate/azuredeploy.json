@@ -105,7 +105,7 @@
                                             "Content-Type": "application/json"
                                         },
                                         "body": {
-                                            "query": "let SettledAlerts = materialize(\n    Halcyon_Commands_CL\n    | summarize FirstSeen = min(TimeGenerated) by HalcyonAlertId\n    | where FirstSeen < ago(15m)\n);\nlet LatestStatus = materialize(\n    Halcyon_Commands_CL\n    | where TimeGenerated > ago(15m)\n    | where HalcyonAlertId in (SettledAlerts | project HalcyonAlertId)\n    | summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n    | project HalcyonAlertId, HalcyonTriageStatus, HalcyonDisplayStatus\n);\nSecurityIncident\n| where Labels has_cs \"Halcyon\"\n| summarize arg_max(TimeGenerated, *) by IncidentNumber\n| where Status != \"Closed\"\n| mv-expand AlertIds to typeof(string)\n| join kind=inner (\n    SecurityAlert\n    | where AlertName has \"Halcyon\"\n    | extend HalcyonAlertId = tostring(ExtendedProperties[\"HalcyonAlertId\"])\n    | where HalcyonAlertId in (LatestStatus | project HalcyonAlertId)\n    | project SystemAlertId, HalcyonAlertId\n) on $left.AlertIds == $right.SystemAlertId\n| join kind=inner LatestStatus on HalcyonAlertId\n| project IncidentId = IncidentName, HalcyonAlertId, HalcyonTriageStatus, HalcyonDisplayStatus, ExistingLabels = Labels"
+                                            "query": "let SettledAlerts = materialize(\n    Halcyon_Commands_CL\n    | where TimeGenerated > ago(14d)\n    | summarize FirstSeen = min(TimeGenerated) by HalcyonAlertId\n    | where FirstSeen < ago(15m)\n);\nlet LatestStatus = materialize(\n    Halcyon_Commands_CL\n    | where TimeGenerated > ago(15m)\n    | where HalcyonAlertId in (SettledAlerts | project HalcyonAlertId)\n    | summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n    | project HalcyonAlertId, HalcyonTriageStatus, HalcyonDisplayStatus\n);\nSecurityIncident\n| where Labels has_cs \"Halcyon\"\n| summarize arg_max(TimeGenerated, *) by IncidentNumber\n| where Status != \"Closed\"\n| mv-expand AlertIds to typeof(string)\n| join kind=inner (\n    SecurityAlert\n    | where AlertName has \"Halcyon\"\n    | extend HalcyonAlertId = tostring(ExtendedProperties[\"HalcyonAlertId\"])\n    | where HalcyonAlertId in (LatestStatus | project HalcyonAlertId)\n    | project SystemAlertId, HalcyonAlertId\n) on $left.AlertIds == $right.SystemAlertId\n| join kind=inner LatestStatus on HalcyonAlertId\n| project IncidentId = IncidentName, HalcyonAlertId, HalcyonTriageStatus, HalcyonDisplayStatus"
                                         },
                                         "authentication": {
                                             "type": "ManagedServiceIdentity",
@@ -153,8 +153,7 @@
                                             "IncidentId": "@item()[0]",
                                             "HalcyonAlertId": "@item()[1]",
                                             "HalcyonTriageStatus": "@item()[2]",
-                                            "HalcyonDisplayStatus": "@item()[3]",
-                                            "ExistingLabels": "@item()[4]"
+                                            "HalcyonDisplayStatus": "@item()[3]"
                                         }
                                     }
                                 },

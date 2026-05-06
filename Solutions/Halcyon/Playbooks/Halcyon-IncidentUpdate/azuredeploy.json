@@ -22,10 +22,6 @@
             "type": "string",
             "metadata": { "description": "Name of the Log Analytics workspace containing Halcyon_Commands_CL and Microsoft Sentinel." }
         },
-        "WorkspaceId": {
-            "type": "string",
-            "metadata": { "description": "GUID of the Log Analytics workspace (found in workspace Properties)." }
-        },
         "SubscriptionId": {
             "type": "string",
             "defaultValue": "[subscription().subscriptionId]"
@@ -134,10 +130,6 @@
                             "defaultValue": {},
                             "type": "Object"
                         },
-                        "workspaceId": {
-                            "type": "string",
-                            "defaultValue": "[parameters('WorkspaceId')]"
-                        },
                         "subscriptionId": {
                             "type": "string",
                             "defaultValue": "[parameters('SubscriptionId')]"
@@ -203,9 +195,16 @@
                                         "concurrency": { "repetitions": 1 }
                                     },
                                     "actions": {
+                                        "Compose_Incident_Arm_Id": {
+                                            "type": "Compose",
+                                            "runAfter": {},
+                                            "inputs": "@concat('/subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/incidents/', items('For_Each_Alert')?['IncidentId'])"
+                                        },
                                         "Get_Incident": {
                                             "type": "ApiConnection",
-                                            "runAfter": {},
+                                            "runAfter": {
+                                                "Compose_Incident_Arm_Id": ["Succeeded"]
+                                            },
                                             "inputs": {
                                                 "host": {
                                                     "connection": {
@@ -215,7 +214,7 @@
                                                 "method": "post",
                                                 "path": "/Incidents",
                                                 "body": {
-                                                    "incidentArmId": "@{concat('/subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/incidents/', items('For_Each_Alert')?['IncidentId'])}"
+                                                    "incidentArmId": "@{outputs('Compose_Incident_Arm_Id')}"
                                                 },
                                                 "retryPolicy": {
                                                     "type": "fixed",
@@ -276,7 +275,7 @@
                                                 "method": "put",
                                                 "path": "/Incidents",
                                                 "body": {
-                                                    "incidentArmId": "@{concat('/subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/incidents/', items('For_Each_Alert')?['IncidentId'])}",
+                                                    "incidentArmId": "@{outputs('Compose_Incident_Arm_Id')}",
                                                     "tagsToAdd": {
                                                         "TagsToAdd": "@outputs('Compose_Tags_To_Add')"
                                                     },

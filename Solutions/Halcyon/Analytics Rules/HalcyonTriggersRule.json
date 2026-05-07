@@ -48,7 +48,7 @@
                     "groupingConfiguration": {
                         "enabled": true,
                         "reopenClosedIncident": false,
-                        "lookbackDuration": "PT1H",
+                        "lookbackDuration": "P7D",
                         "matchingMethod": "Selected",
                         "groupByEntities": [],
                         "groupByAlertDetails": [],

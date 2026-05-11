@@ -289,6 +289,51 @@
                                                     "interval": "PT10S"
                                                 }
                                             }
+                                        },
+                                        "Check_Is_Reviewed": {
+                                            "type": "If",
+                                            "runAfter": {
+                                                "Update_Incident": ["Succeeded"]
+                                            },
+                                            "expression": {
+                                                "and": [
+                                                    {
+                                                        "equals": [
+                                                            "@items('For_Each_Alert')?['HalcyonTriageStatus']",
+                                                            "Reviewed"
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            "actions": {
+                                                "Close_Incident": {
+                                                    "type": "ApiConnection",
+                                                    "runAfter": {},
+                                                    "inputs": {
+                                                        "host": {
+                                                            "connection": {
+                                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                            }
+                                                        },
+                                                        "method": "put",
+                                                        "path": "/Incidents",
+                                                        "body": {
+                                                            "incidentArmId": "@{outputs('Compose_Incident_Arm_Id')}",
+                                                            "status": "Closed",
+                                                            "classification": "Undetermined",
+                                                            "classificationComment": "Closed by Halcyon: alert reviewed in Halcyon platform."
+                                                        },
+                                                        "retryPolicy": {
+                                                            "type": "fixed",
+                                                            "count": 3,
+                                                            "interval": "PT5S"
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            "else": {
+                                                "actions": {}
+                                            }
                                         }
                                     }
                                 }

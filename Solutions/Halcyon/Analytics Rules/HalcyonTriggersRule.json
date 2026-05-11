@@ -64,19 +64,10 @@
                 },
                 "alertDetailsOverride": {
                     "alertDisplayNameFormat": "Halcyon Alert: {{HalcyonAlertId}}",
+                    "alertDescriptionFormat": "Halyon Message: {{message}}",
                     "alertDynamicProperties": []
                 },
-                "entityMappings": [
-                    {
-                        "entityType": "Host",
-                        "fieldMappings": [
-                            {
-                                "columnName": "DeviceName",
-                                "identifier": "HostName"
-                            }
-                        ]
-                    }
-                ],
+                "entityMappings": [],
                 "sentinelEntitiesMappings": null
             }
         },

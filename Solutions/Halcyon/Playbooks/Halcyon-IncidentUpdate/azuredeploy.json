@@ -96,6 +96,11 @@
             ],
             "properties": {
                 "state": "Enabled",
+                "runtimeConfiguration": {
+                    "concurrency": {
+                        "runs": 1
+                    }
+                },
                 "parameters": {
                     "$connections": {
                         "value": {
@@ -176,7 +181,7 @@
                                             "timerange": "Set in query"
                                         },
                                         "body": {
-                                            "query": "let SettledAlerts = materialize(\n    Halcyon_Commands_CL\n    | summarize FirstSeen = min(TimeGenerated) by HalcyonAlertId\n    | where FirstSeen < ago(15m)\n);\nlet LatestStatus = materialize(\n    Halcyon_Commands_CL\n    | where TimeGenerated > ago(15m)\n    | where HalcyonAlertId in (SettledAlerts | project HalcyonAlertId)\n    | summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n    | project HalcyonAlertId, HalcyonTriageStatus, HalcyonDisplayStatus\n);\nSecurityIncident\n| where Labels has_cs \"Halcyon\"\n| summarize arg_max(TimeGenerated, *) by IncidentNumber\n| where Status != \"Closed\"\n| mv-expand AlertIds to typeof(string)\n| join kind=inner (\n    SecurityAlert\n    | where AlertName has \"Halcyon\"\n    | extend CustomDetails = parse_json(tostring(parse_json(tostring(ExtendedProperties))[\"Custom Details\"]))\n    | extend HalcyonAlertId = tostring(CustomDetails[\"HalcyonAlertId\"][0])\n    | where HalcyonAlertId in (LatestStatus | project HalcyonAlertId)\n    | project SystemAlertId, HalcyonAlertId\n) on $left.AlertIds == $right.SystemAlertId\n| join kind=inner LatestStatus on HalcyonAlertId\n| project IncidentId = IncidentName, HalcyonAlertId, HalcyonTriageStatus, HalcyonDisplayStatus"
+                                            "query": "let SettledAlerts = materialize(\n    Halcyon_Commands_CL\n    | summarize FirstSeen = min(TimeGenerated) by HalcyonAlertId\n    | where FirstSeen < ago(15m)\n);\nlet LatestStatus = materialize(\n    Halcyon_Commands_CL\n    | where TimeGenerated > ago(15m)\n    | where HalcyonAlertId in (SettledAlerts | project HalcyonAlertId)\n    | summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n    | project HalcyonAlertId, HalcyonTriageStatus, HalcyonDisplayStatus\n);\nSecurityIncident\n| where Labels has_cs \"Halcyon\"\n| summarize arg_max(TimeGenerated, *) by IncidentNumber\n| where Status != \"Closed\"\n| mv-expand AlertIds to typeof(string)\n| join kind=inner (\n    SecurityAlert\n    | where AlertName has \"Halcyon\"\n    | extend CustomDetails = parse_json(tostring(parse_json(tostring(ExtendedProperties))[\"Custom Details\"]))\n    | extend HalcyonAlertId = tostring(CustomDetails[\"HalcyonAlertId\"][0])\n    | where HalcyonAlertId in (LatestStatus | project HalcyonAlertId)\n    | project SystemAlertId, HalcyonAlertId\n) on $left.AlertIds == $right.SystemAlertId\n| join kind=inner LatestStatus on HalcyonAlertId\n| summarize arg_max(TimeGenerated, *) by IncidentName, HalcyonAlertId\n| project IncidentId = IncidentName, HalcyonAlertId, HalcyonTriageStatus, HalcyonDisplayStatus"
                                         },
                                         "retryPolicy": {
                                             "type": "fixed",
@@ -185,10 +190,42 @@
                                         }
                                     }
                                 },
+                                "Check_Result_Size": {
+                                    "type": "If",
+                                    "runAfter": {
+                                        "Run_KQL_Query": ["Succeeded"]
+                                    },
+                                    "expression": {
+                                        "and": [
+                                            {
+                                                "greater": [
+                                                    "@length(body('Run_KQL_Query')?['value'])",
+                                                    100
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "actions": {
+                                        "Terminate_Too_Many_Rows": {
+                                            "type": "Terminate",
+                                            "runAfter": {},
+                                            "inputs": {
+                                                "runStatus": "Failed",
+                                                "runError": {
+                                                    "code": "TooManyRows",
+                                                    "message": "@{concat('KQL returned ', length(body('Run_KQL_Query')?['value']), ' rows — circuit breaker tripped (limit 100). Investigate for duplicate data before re-enabling.')}"
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "else": {
+                                        "actions": {}
+                                    }
+                                },
                                 "For_Each_Alert": {
                                     "type": "Foreach",
                                     "runAfter": {
-                                        "Run_KQL_Query": ["Succeeded"]
+                                        "Check_Result_Size": ["Succeeded"]
                                     },
                                     "foreach": "@body('Run_KQL_Query')?['value']",
                                     "runtimeConfiguration": {

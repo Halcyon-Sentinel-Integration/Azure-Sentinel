@@ -96,11 +96,6 @@
             ],
             "properties": {
                 "state": "Enabled",
-                "runtimeConfiguration": {
-                    "concurrency": {
-                        "runs": 1
-                    }
-                },
                 "parameters": {
                     "$connections": {
                         "value": {
@@ -154,6 +149,11 @@
                             "recurrence": {
                                 "frequency": "[parameters('RecurrenceFrequency')]",
                                 "interval": "[parameters('RecurrenceInterval')]"
+                            },
+                            "runtimeConfiguration": {
+                                "concurrency": {
+                                    "runs": 1
+                                }
                             }
                         }
                     },

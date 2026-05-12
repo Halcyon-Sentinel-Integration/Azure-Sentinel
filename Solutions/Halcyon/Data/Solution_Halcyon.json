@@ -11,7 +11,9 @@
   "Analytic Rules": [
     "Analytics Rules/HalcyonTriggersRule.json"
   ],
-  "Hunting Queries": [],
+  "Hunting Queries": [
+    "Hunting Queries/HalcyonRelatedEvents.json"
+  ],
   "Playbooks": [],
   "BasePath": "C:\\GitHub\\Azure-Sentinel\\Solutions\\Halcyon",
   "Version": "3.1.0",

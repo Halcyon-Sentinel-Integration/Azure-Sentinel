@@ -68,7 +68,7 @@
                 },
                 "alertDetailsOverride": {
                     "alertDisplayNameFormat": "Halcyon Alert: {{HalcyonAlertId}}",
-                    "alertDescriptionFormat": "Halyon Message: {{message}}",
+                    "alertDescriptionFormat": "{{message}}.\n\nHalcyon detection for alert ID `{{HalcyonAlertId}}`.\nTo see related events, run this query in Logs:\n\n```\nHalcyonEvents_CL\n| extend HalcyonInstancesAlertId = tostring(finding_info.uid)\n| where HalcyonInstancesAlertId == \"{{HalcyonAlertId}}\"\n```",
                     "alertDynamicProperties": []
                 },
                 "entityMappings": [

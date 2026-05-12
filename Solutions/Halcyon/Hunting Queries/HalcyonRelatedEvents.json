@@ -7,7 +7,7 @@
         "etag": "*",
         "displayName": "Halcyon - Related Events for Alert",
         "category": "Hunting Queries",
-        "query": "// Find all HalcyonEvents_CL records related to a specific HalcyonAlertId.\n// Replace <HalcyonAlertIdFromIncident> with the HalcyonAlertId custom detail from the Sentinel incident.\nlet TargetAlertId = \"<HalcyonAlertIdFromIncident>\";\nHalcyonEvents_CL\n| extend HalcyonInstancesAlertId = tostring(finding_info.uid)\n| where HalcyonInstancesAlertId == TargetAlertId\n| order by TimeGenerated desc",
+        "query": "// Find all HalcyonEvents_CL records related to a specific HalcyonAlertId.\n// Replace <HalcyonAlertIdFromIncident> with the HalcyonAlertId custom detail from the Sentinel incident.\nlet TargetAlertId = \"<HalcyonAlertIdFromIncident>\";\nHalcyonEvents_CL\n| extend HalcyonAlertId = tostring(parse_json(unmapped)['halcyon_alert_id'])\n| where HalcyonAlertId == TargetAlertId\n| order by TimeGenerated desc",
         "version": 2,
         "tags": [
             { "name": "description", "value": "Returns all Halcyon event records (HalcyonEvents_CL) whose finding_info.uid matches the supplied HalcyonAlertId. Used to investigate the event timeline behind a Halcyon-triggered incident." },

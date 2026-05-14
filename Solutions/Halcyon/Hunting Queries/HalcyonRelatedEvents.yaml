@@ -1,0 +1,22 @@
+id: e3a4d2f0-7b14-4f3c-9c2e-2c4f1d8b6a01
+name: Halcyon - Related Events for Alert
+description: |
+  Returns all Halcyon event records (HalcyonEvents_CL) whose finding_info.uid matches the supplied HalcyonAlertId. Used to investigate the event timeline behind a Halcyon-triggered incident.
+requiredDataConnectors:
+  - connectorId: HalcyonPush
+    dataTypes:
+      - HalcyonEvents_CL
+tactics:
+  - Execution
+  - Impact
+relevantTechniques:
+  - T1486
+query: |
+  // Find all HalcyonEvents_CL records related to a specific HalcyonAlertId.
+  // Replace <HalcyonAlertIdFromIncident> with the HalcyonAlertId custom detail from the Sentinel incident.
+  let TargetAlertId = "<HalcyonAlertIdFromIncident>";
+  HalcyonEvents_CL
+  | extend HalcyonAlertId = tostring(parse_json(unmapped)['halcyon_alert_id'])
+  | where HalcyonAlertId == TargetAlertId
+  | order by TimeGenerated desc
+version: 1.0.0

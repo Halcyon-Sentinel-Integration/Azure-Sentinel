@@ -275,14 +275,14 @@
                                             "runAfter": {
                                                 "Filter_Labels_To_Remove": ["Succeeded"]
                                             },
-                                            "inputs": "@if(empty(coalesce(items('For_Each_Alert')?['HalcyonTriageStatus'], '')), createArray(), createArray(createObject('Tag', concat('Halcyon Triage Status: ', items('For_Each_Alert')?['HalcyonTriageStatus']))))"
+                                            "inputs": "@if(empty(coalesce(items('For_Each_Alert')?['HalcyonTriageStatus'], '')), createArray(), createArray(json(concat('{\"Tag\":\"Halcyon Triage Status: ', items('For_Each_Alert')?['HalcyonTriageStatus'], '\"}'))))"
                                         },
                                         "Compose_Display_Label": {
                                             "type": "Compose",
                                             "runAfter": {
                                                 "Compose_Triage_Label": ["Succeeded"]
                                             },
-                                            "inputs": "@if(empty(coalesce(items('For_Each_Alert')?['HalcyonDisplayStatus'], '')), createArray(), createArray(createObject('Tag', concat('Halcyon Display Status: ', items('For_Each_Alert')?['HalcyonDisplayStatus']))))"
+                                            "inputs": "@if(empty(coalesce(items('For_Each_Alert')?['HalcyonDisplayStatus'], '')), createArray(), createArray(json(concat('{\"Tag\":\"Halcyon Display Status: ', items('For_Each_Alert')?['HalcyonDisplayStatus'], '\"}'))))"
                                         },
                                         "Compose_Tags_To_Add": {
                                             "type": "Compose",
@@ -292,11 +292,16 @@
                                             "inputs": "@union(outputs('Compose_Triage_Label'), outputs('Compose_Display_Label'))"
                                         },
                                         "Compose_Tags_To_Remove": {
-                                            "type": "Compose",
+                                            "type": "Select",
                                             "runAfter": {
                                                 "Compose_Tags_To_Add": ["Succeeded"]
                                             },
-                                            "inputs": "@select(body('Filter_Labels_To_Remove'), createObject('Tag', item()?['labelName']))"
+                                            "inputs": {
+                                                "from": "@body('Filter_Labels_To_Remove')",
+                                                "select": {
+                                                    "Tag": "@item()?['labelName']"
+                                                }
+                                            }
                                         },
                                         "Update_Incident": {
                                             "type": "ApiConnection",
@@ -317,7 +322,7 @@
                                                         "TagsToAdd": "@outputs('Compose_Tags_To_Add')"
                                                     },
                                                     "tagsToRemove": {
-                                                        "TagsToRemove": "@outputs('Compose_Tags_To_Remove')"
+                                                        "TagsToRemove": "@body('Compose_Tags_To_Remove')"
                                                     }
                                                 },
                                                 "retryPolicy": {

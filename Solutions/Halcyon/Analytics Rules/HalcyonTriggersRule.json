@@ -68,7 +68,7 @@
                 },
                 "alertDetailsOverride": {
                     "alertDisplayNameFormat": "Halcyon Alert: {{HalcyonAlertId}}",
-                    "alertDescriptionFormat": "{{message}}.\n\nHalcyon detection for alert ID `{{HalcyonAlertId}}`.\n\nTo see related events, run this query in Logs:\n\nHalcyonEvents_CL\n\n| extend HalcyonAlertId = tostring(parse_json(unmapped)['halcyon_alert_id'])\n\n| where HalcyonAlertId == '{{HalcyonAlertId}}'",
+                    "alertDescriptionFormat": "{{message}}.\n\nHalcyon detection for alert ID `{{HalcyonAlertId}}`.\n\nTo see related events, run this query in Logs:\n\nHalcyonEvents_CL\n | extend HalcyonAlertId = tostring(parse_json(unmapped)['halcyon_alert_id'])\n | where HalcyonAlertId == '{{HalcyonAlertId}}'",
                     "alertDynamicProperties": []
                 },
                 "entityMappings": [

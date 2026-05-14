@@ -12,7 +12,7 @@
     "Analytics Rules/HalcyonTriggersRule.json"
   ],
   "Hunting Queries": [
-    "Hunting Queries/HalcyonRelatedEvents.json"
+    "Hunting Queries/HalcyonRelatedEvents.yaml"
   ],
   "Playbooks": [
     "Playbooks/Halcyon-IncidentUpdate/azuredeploy.json"

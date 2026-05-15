@@ -362,7 +362,9 @@
                                                         "body": {
                                                             "incidentArmId": "@{outputs('Compose_Incident_Arm_Id')}",
                                                             "status": "Closed",
-                                                            "classification": "Undetermined",
+                                                            "classification": {
+                                                                "ClassificationAndReason": "Undetermined"
+                                                            },
                                                             "classificationComment": "Closed by Halcyon: alert reviewed in Halcyon platform."
                                                         },
                                                         "retryPolicy": {

@@ -15,7 +15,8 @@
     "Hunting Queries/HalcyonRelatedEvents.yaml"
   ],
   "Playbooks": [
-    "Playbooks/Halcyon-IncidentUpdate/azuredeploy.json"
+    "Playbooks/Halcyon-IncidentUpdate/azuredeploy.json",
+    "Playbooks/Halcyon-AlertProcessor/azuredeploy.json"
   ],
   "BasePath": "C:\\GitHub\\Azure-Sentinel\\Solutions\\Halcyon",
   "Version": "3.1.0",

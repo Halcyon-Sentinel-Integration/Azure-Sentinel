@@ -1,0 +1,399 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "metadata": {
+        "title": "Halcyon-AlertProcessor",
+        "description": "Polls Halcyon_Commands_CL every minute, deduplicates against a Sentinel watchlist, and creates Sentinel incidents directly via the REST API. Bypasses SecurityAlert ingestion lag that causes duplicate incidents with analytics rules.",
+        "prerequisites": [
+            "1. The Halcyon data connector must be deployed and ingesting data into Halcyon_Commands_CL.",
+            "2. The deploying principal must have permission to create role assignments on the Log Analytics workspace.",
+            "3. Disable the Halcyon - New Alert Detected analytics rule while this playbook is active to avoid duplicate incidents."
+        ],
+        "tags": ["Halcyon", "AlertProcessor"],
+        "author": { "name": "Halcyon" },
+        "support": { "tier": "developer", "link": "https://www.halcyon.ai" }
+    },
+    "parameters": {
+        "PlaybookName": {
+            "type": "string",
+            "defaultValue": "Halcyon-AlertProcessor"
+        },
+        "WorkspaceName": {
+            "type": "string",
+            "metadata": { "description": "Name of the Log Analytics workspace containing Halcyon_Commands_CL and Microsoft Sentinel." }
+        },
+        "SubscriptionId": {
+            "type": "string",
+            "defaultValue": "[subscription().subscriptionId]"
+        },
+        "ResourceGroupName": {
+            "type": "string",
+            "defaultValue": "[resourceGroup().name]"
+        },
+        "WatchlistAlias": {
+            "type": "string",
+            "defaultValue": "HalcyonProcessedIds",
+            "metadata": { "description": "Alias of the Sentinel watchlist used to track already-processed HalcyonAlertIds." }
+        },
+        "RecurrenceFrequency": {
+            "type": "string",
+            "defaultValue": "Minute",
+            "allowedValues": ["Minute", "Hour"]
+        },
+        "RecurrenceInterval": {
+            "type": "int",
+            "defaultValue": 1,
+            "metadata": { "description": "How often to run the processor, in units of RecurrenceFrequency." }
+        }
+    },
+    "variables": {
+        "sentinelResponderRoleId": "3e150937-b8fe-4cfb-8069-0eaf05ecd056",
+        "logAnalyticsReaderRoleId": "73c42c96-874c-492b-b04d-ab87d138a893",
+        "monitoringReaderRoleId": "43d0d8ad-25c7-4714-9337-8ba259a9fe05",
+        "azureMonitorLogsConnectionName": "[concat('azuremonitorlogs-', parameters('PlaybookName'))]",
+        "azureSentinelConnectionName": "[concat('azuresentinel-', parameters('PlaybookName'))]"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Web/connections",
+            "apiVersion": "2016-06-01",
+            "name": "[variables('azureMonitorLogsConnectionName')]",
+            "location": "[resourceGroup().location]",
+            "kind": "V1",
+            "properties": {
+                "displayName": "[variables('azureMonitorLogsConnectionName')]",
+                "customParameterValues": {},
+                "parameterValueSet": {
+                    "name": "managedIdentityAuth",
+                    "values": {}
+                },
+                "api": {
+                    "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azuremonitorlogs')]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Web/connections",
+            "apiVersion": "2016-06-01",
+            "name": "[variables('azureSentinelConnectionName')]",
+            "location": "[resourceGroup().location]",
+            "kind": "V1",
+            "properties": {
+                "displayName": "[variables('azureSentinelConnectionName')]",
+                "customParameterValues": {},
+                "parameterValueType": "Alternative",
+                "api": {
+                    "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azuresentinel')]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.OperationalInsights/workspaces/providers/watchlists",
+            "apiVersion": "2023-12-01-preview",
+            "name": "[concat(parameters('WorkspaceName'), '/Microsoft.SecurityInsights/', parameters('WatchlistAlias'))]",
+            "properties": {
+                "displayName": "Halcyon Processed Alert IDs",
+                "description": "Tracks HalcyonAlertIds that have been processed by the Halcyon-AlertProcessor playbook to prevent duplicate incidents.",
+                "provider": "Halcyon Solution",
+                "source": "Local file",
+                "itemsSearchKey": "HalcyonAlertId",
+                "contentType": "Text/Csv",
+                "numberOfLinesToSkip": 0,
+                "rawContent": "HalcyonAlertId,ProcessedTime\n"
+            }
+        },
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2019-05-01",
+            "name": "[parameters('PlaybookName')]",
+            "location": "[resourceGroup().location]",
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/connections', variables('azureMonitorLogsConnectionName'))]",
+                "[resourceId('Microsoft.Web/connections', variables('azureSentinelConnectionName'))]",
+                "[resourceId('Microsoft.OperationalInsights/workspaces/providers/watchlists', parameters('WorkspaceName'), 'Microsoft.SecurityInsights', parameters('WatchlistAlias'))]"
+            ],
+            "properties": {
+                "state": "Enabled",
+                "parameters": {
+                    "$connections": {
+                        "value": {
+                            "azuremonitorlogs": {
+                                "connectionId": "[resourceId('Microsoft.Web/connections', variables('azureMonitorLogsConnectionName'))]",
+                                "connectionName": "[variables('azureMonitorLogsConnectionName')]",
+                                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azuremonitorlogs')]",
+                                "connectionProperties": {
+                                    "authentication": {
+                                        "type": "ManagedServiceIdentity"
+                                    }
+                                }
+                            },
+                            "azuresentinel": {
+                                "connectionId": "[resourceId('Microsoft.Web/connections', variables('azureSentinelConnectionName'))]",
+                                "connectionName": "[variables('azureSentinelConnectionName')]",
+                                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azuresentinel')]",
+                                "connectionProperties": {
+                                    "authentication": {
+                                        "type": "ManagedServiceIdentity"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "$connections": {
+                            "defaultValue": {},
+                            "type": "Object"
+                        },
+                        "subscriptionId": {
+                            "type": "string",
+                            "defaultValue": "[parameters('SubscriptionId')]"
+                        },
+                        "resourceGroupName": {
+                            "type": "string",
+                            "defaultValue": "[parameters('ResourceGroupName')]"
+                        },
+                        "workspaceName": {
+                            "type": "string",
+                            "defaultValue": "[parameters('WorkspaceName')]"
+                        },
+                        "workspaceId": {
+                            "type": "string",
+                            "defaultValue": "[reference(resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName')), '2022-10-01').customerId]"
+                        },
+                        "watchlistAlias": {
+                            "type": "string",
+                            "defaultValue": "[parameters('WatchlistAlias')]"
+                        }
+                    },
+                    "triggers": {
+                        "Recurrence": {
+                            "type": "Recurrence",
+                            "recurrence": {
+                                "frequency": "[parameters('RecurrenceFrequency')]",
+                                "interval": "[parameters('RecurrenceInterval')]"
+                            },
+                            "runtimeConfiguration": {
+                                "concurrency": {
+                                    "runs": 1
+                                }
+                            }
+                        }
+                    },
+                    "actions": {
+                        "Main_Scope": {
+                            "type": "Scope",
+                            "runAfter": {},
+                            "actions": {
+                                "Run_KQL_Query": {
+                                    "type": "ApiConnection",
+                                    "runAfter": {},
+                                    "inputs": {
+                                        "host": {
+                                            "connection": {
+                                                "name": "@parameters('$connections')['azuremonitorlogs']['connectionId']"
+                                            }
+                                        },
+                                        "method": "post",
+                                        "path": "/queryData",
+                                        "queries": {
+                                            "subscriptions": "@parameters('subscriptionId')",
+                                            "resourcegroups": "@parameters('resourceGroupName')",
+                                            "resourcetype": "Log Analytics Workspace",
+                                            "resourcename": "@parameters('workspaceName')",
+                                            "timerange": "Set in query"
+                                        },
+                                        "body": {
+                                            "query": "Halcyon_Commands_CL\n| where TimeGenerated > ago(2m)\n| summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n| project HalcyonAlertId, message, finding_info, evidences, device, HalcyonSourceTime"
+                                        },
+                                        "retryPolicy": {
+                                            "type": "fixed",
+                                            "count": 3,
+                                            "interval": "PT10S"
+                                        }
+                                    }
+                                },
+                                "Foreach_Result": {
+                                    "type": "Foreach",
+                                    "runAfter": {
+                                        "Run_KQL_Query": ["Succeeded"]
+                                    },
+                                    "foreach": "@body('Run_KQL_Query')?['value']",
+                                    "runtimeConfiguration": {
+                                        "concurrency": { "repetitions": 1 }
+                                    },
+                                    "actions": {
+                                        "Read_Watchlist_Item": {
+                                            "type": "ApiConnection",
+                                            "runAfter": {},
+                                            "inputs": {
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "get",
+                                                "path": "@{concat('/Watchlists/subscriptions/', encodeURIComponent(parameters('subscriptionId')), '/resourceGroups/', encodeURIComponent(parameters('resourceGroupName')), '/workspaces/', encodeURIComponent(parameters('workspaceId')), '/watchlists/', encodeURIComponent(parameters('watchlistAlias')), '/watchlistItem/', encodeURIComponent(guid(items('Foreach_Result')?['HalcyonAlertId'])))}"
+                                            }
+                                        },
+                                        "Check_If_Already_Processed": {
+                                            "type": "If",
+                                            "runAfter": {
+                                                "Read_Watchlist_Item": ["Succeeded", "Failed"]
+                                            },
+                                            "expression": {
+                                                "or": [
+                                                    {
+                                                        "equals": [
+                                                            "@coalesce(outputs('Read_Watchlist_Item')?['statusCode'], 404)",
+                                                            404
+                                                        ]
+                                                    },
+                                                    {
+                                                        "equals": [
+                                                            "@actions('Read_Watchlist_Item')?['status']",
+                                                            "Failed"
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            "actions": {
+                                                "Add_To_Watchlist": {
+                                                    "type": "ApiConnection",
+                                                    "runAfter": {},
+                                                    "inputs": {
+                                                        "host": {
+                                                            "connection": {
+                                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                            }
+                                                        },
+                                                        "method": "put",
+                                                        "path": "@{concat('/Watchlists/subscriptions/', encodeURIComponent(parameters('subscriptionId')), '/resourceGroups/', encodeURIComponent(parameters('resourceGroupName')), '/workspaces/', encodeURIComponent(parameters('workspaceId')), '/watchlists/', encodeURIComponent(parameters('watchlistAlias')), '/watchlistItem/', encodeURIComponent(guid(items('Foreach_Result')?['HalcyonAlertId'])))}",
+                                                        "body": {
+                                                            "escapedJsonOfWatchlistItemFields": "@{concat('{\"HalcyonAlertId\":\"', items('Foreach_Result')?['HalcyonAlertId'], '\",\"ProcessedTime\":\"', utcNow(), '\"}}')}"
+                                                        },
+                                                        "retryPolicy": {
+                                                            "type": "fixed",
+                                                            "count": 3,
+                                                            "interval": "PT10S"
+                                                        }
+                                                    }
+                                                },
+                                                "Create_Incident": {
+                                                    "type": "ApiConnection",
+                                                    "runAfter": {
+                                                        "Add_To_Watchlist": ["Succeeded"]
+                                                    },
+                                                    "inputs": {
+                                                        "host": {
+                                                            "connection": {
+                                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                            }
+                                                        },
+                                                        "method": "put",
+                                                        "path": "/Incidents",
+                                                        "body": {
+                                                            "incidentArmId": "@{concat('/subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/incidents/', guid(items('Foreach_Result')?['HalcyonAlertId']))}",
+                                                            "title": "@{concat('Halcyon Alert: ', items('Foreach_Result')?['HalcyonAlertId'])}",
+                                                            "description": "@{concat(coalesce(items('Foreach_Result')?['message'], ''), '.\n\nHalcyon detection for alert ID `', items('Foreach_Result')?['HalcyonAlertId'], '`.\n\nTo see related events, run this query in Logs:\n\nHalcyonEvents_CL\n | extend HalcyonAlertId = tostring(parse_json(unmapped)[''halcyon_alert_id''])\n | where HalcyonAlertId == ''', items('Foreach_Result')?['HalcyonAlertId'], '''')}",
+                                                            "severity": "High",
+                                                            "status": "New",
+                                                            "tagsToAdd": {
+                                                                "TagsToAdd": [{ "Tag": "Halcyon" }]
+                                                            }
+                                                        },
+                                                        "retryPolicy": {
+                                                            "type": "fixed",
+                                                            "count": 3,
+                                                            "interval": "PT10S"
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            "else": {
+                                                "actions": {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "Handle_Failure": {
+                            "type": "Compose",
+                            "runAfter": {
+                                "Main_Scope": ["Failed", "Skipped", "TimedOut"]
+                            },
+                            "inputs": {
+                                "message": "Halcyon-AlertProcessor playbook failed.",
+                                "scopeStatus": "@result('Main_Scope')",
+                                "runId": "@workflow().run.name",
+                                "workflowName": "@workflow().name"
+                            }
+                        },
+                        "Terminate_With_Failure": {
+                            "type": "Terminate",
+                            "runAfter": {
+                                "Handle_Failure": ["Succeeded"]
+                            },
+                            "inputs": {
+                                "runStatus": "Failed",
+                                "runError": {
+                                    "code": "MainScopeFailed",
+                                    "message": "@{string(outputs('Handle_Failure'))}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName')), resourceId('Microsoft.Logic/workflows', parameters('PlaybookName')), variables('sentinelResponderRoleId'))]",
+            "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Logic/workflows', parameters('PlaybookName'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('sentinelResponderRoleId'))]",
+                "principalId": "[reference(resourceId('Microsoft.Logic/workflows', parameters('PlaybookName')), '2019-05-01', 'Full').identity.principalId]",
+                "principalType": "ServicePrincipal"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName')), resourceId('Microsoft.Logic/workflows', parameters('PlaybookName')), variables('logAnalyticsReaderRoleId'))]",
+            "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Logic/workflows', parameters('PlaybookName'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('logAnalyticsReaderRoleId'))]",
+                "principalId": "[reference(resourceId('Microsoft.Logic/workflows', parameters('PlaybookName')), '2019-05-01', 'Full').identity.principalId]",
+                "principalType": "ServicePrincipal"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName')), resourceId('Microsoft.Logic/workflows', parameters('PlaybookName')), variables('monitoringReaderRoleId'))]",
+            "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Logic/workflows', parameters('PlaybookName'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('monitoringReaderRoleId'))]",
+                "principalId": "[reference(resourceId('Microsoft.Logic/workflows', parameters('PlaybookName')), '2019-05-01', 'Full').identity.principalId]",
+                "principalType": "ServicePrincipal"
+            }
+        }
+    ]
+}

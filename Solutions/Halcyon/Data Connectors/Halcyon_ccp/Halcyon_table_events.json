@@ -58,6 +58,10 @@
                     "type": "string"
                 },
                 {
+                    "name": "raw_data",
+                    "type": "string"
+                },
+                {
                     "name": "status_id",
                     "type": "int"
                 },

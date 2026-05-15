@@ -70,6 +70,10 @@
                     "type": "string"
                 },
                 {
+                    "name": "raw_data",
+                    "type": "string"
+                },
+                {
                     "name": "action_id",
                     "type": "int"
                 },

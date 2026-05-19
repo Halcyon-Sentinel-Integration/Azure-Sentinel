@@ -47,7 +47,7 @@
         }
     },
     "variables": {
-        "sentinelResponderRoleId": "3e150937-b8fe-4cfb-8069-0eaf05ecd056",
+        "sentinelContributorRoleId": "ab8e14d6-4a74-4a29-9ba8-549422addade",
         "logAnalyticsReaderRoleId": "73c42c96-874c-492b-b04d-ab87d138a893",
         "monitoringReaderRoleId": "43d0d8ad-25c7-4714-9337-8ba259a9fe05",
         "azureMonitorLogsConnectionName": "[concat('azuremonitorlogs-', parameters('PlaybookName'))]",
@@ -170,6 +170,10 @@
                         "watchlistAlias": {
                             "type": "string",
                             "defaultValue": "[parameters('WatchlistAlias')]"
+                        },
+                        "armEndpoint": {
+                            "type": "string",
+                            "defaultValue": "[environment().resourceManager]"
                         }
                     },
                     "triggers": {
@@ -210,7 +214,7 @@
                                             "timerange": "Set in query"
                                         },
                                         "body": {
-                                            "query": "Halcyon_Commands_CL\n| where TimeGenerated > ago(2m)\n| summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n| project HalcyonAlertId, message, finding_info, evidences, device, HalcyonSourceTime"
+                                            "query": "Halcyon_Commands_CL\n| where TimeGenerated > ago(2m)\n| summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n| project HalcyonAlertId, message, finding_info, evidences, device, HalcyonSourceTime, HalcyonTriageStatus, HalcyonDisplayStatus"
                                         },
                                         "retryPolicy": {
                                             "type": "fixed",
@@ -229,9 +233,37 @@
                                         "concurrency": { "repetitions": 1 }
                                     },
                                     "actions": {
+                                        "Compose_Alert_Guid": {
+                                            "type": "Compose",
+                                            "runAfter": {},
+                                            "inputs": "@{concat(substring(items('Foreach_Result')?['HalcyonAlertId'], 0, 8), '-', substring(items('Foreach_Result')?['HalcyonAlertId'], 8, 4), '-', '5', substring(items('Foreach_Result')?['HalcyonAlertId'], 13, 3), '-', 'a', substring(items('Foreach_Result')?['HalcyonAlertId'], 17, 3), '-', substring(items('Foreach_Result')?['HalcyonAlertId'], 20, 12))}"
+                                        },
+                                        "Compose_Triage_Label": {
+                                            "type": "Compose",
+                                            "runAfter": {
+                                                "Compose_Alert_Guid": ["Succeeded"]
+                                            },
+                                            "inputs": "@if(empty(coalesce(items('Foreach_Result')?['HalcyonTriageStatus'], '')), createArray(), createArray(json(concat('{\"labelName\":\"Halcyon Triage Status: ', items('Foreach_Result')?['HalcyonTriageStatus'], '\"}'))))"
+                                        },
+                                        "Compose_Display_Label": {
+                                            "type": "Compose",
+                                            "runAfter": {
+                                                "Compose_Triage_Label": ["Succeeded"]
+                                            },
+                                            "inputs": "@if(empty(coalesce(items('Foreach_Result')?['HalcyonDisplayStatus'], '')), createArray(), createArray(json(concat('{\"labelName\":\"Halcyon Display Status: ', items('Foreach_Result')?['HalcyonDisplayStatus'], '\"}'))))"
+                                        },
+                                        "Compose_Labels": {
+                                            "type": "Compose",
+                                            "runAfter": {
+                                                "Compose_Display_Label": ["Succeeded"]
+                                            },
+                                            "inputs": "@union(createArray(json('{\"labelName\":\"Halcyon\"}')), outputs('Compose_Triage_Label'), outputs('Compose_Display_Label'))"
+                                        },
                                         "Read_Watchlist_Item": {
                                             "type": "ApiConnection",
-                                            "runAfter": {},
+                                            "runAfter": {
+                                                "Compose_Alert_Guid": ["Succeeded"]
+                                            },
                                             "inputs": {
                                                 "host": {
                                                     "connection": {
@@ -239,13 +271,14 @@
                                                     }
                                                 },
                                                 "method": "get",
-                                                "path": "@{concat('/Watchlists/subscriptions/', encodeURIComponent(parameters('subscriptionId')), '/resourceGroups/', encodeURIComponent(parameters('resourceGroupName')), '/workspaces/', encodeURIComponent(parameters('workspaceId')), '/watchlists/', encodeURIComponent(parameters('watchlistAlias')), '/watchlistItem/', encodeURIComponent(guid(items('Foreach_Result')?['HalcyonAlertId'])))}"
+                                                "path": "/Watchlists/subscriptions/@{encodeURIComponent(parameters('subscriptionId'))}/resourceGroups/@{encodeURIComponent(parameters('resourceGroupName'))}/workspaces/@{encodeURIComponent(parameters('workspaceId'))}/watchlists/@{encodeURIComponent(parameters('watchlistAlias'))}/watchlistItem/@{encodeURIComponent(outputs('Compose_Alert_Guid'))}"
                                             }
                                         },
                                         "Check_If_Already_Processed": {
                                             "type": "If",
                                             "runAfter": {
-                                                "Read_Watchlist_Item": ["Succeeded", "Failed"]
+                                                "Read_Watchlist_Item": ["Succeeded", "Failed"],
+                                                "Compose_Labels": ["Succeeded"]
                                             },
                                             "expression": {
                                                 "or": [
@@ -274,9 +307,10 @@
                                                             }
                                                         },
                                                         "method": "put",
-                                                        "path": "@{concat('/Watchlists/subscriptions/', encodeURIComponent(parameters('subscriptionId')), '/resourceGroups/', encodeURIComponent(parameters('resourceGroupName')), '/workspaces/', encodeURIComponent(parameters('workspaceId')), '/watchlists/', encodeURIComponent(parameters('watchlistAlias')), '/watchlistItem/', encodeURIComponent(guid(items('Foreach_Result')?['HalcyonAlertId'])))}",
+                                                        "path": "/Watchlists/subscriptions/@{encodeURIComponent(parameters('subscriptionId'))}/resourceGroups/@{encodeURIComponent(parameters('resourceGroupName'))}/workspaces/@{encodeURIComponent(parameters('workspaceId'))}/watchlists/@{encodeURIComponent(parameters('watchlistAlias'))}/watchlistItem/@{encodeURIComponent(outputs('Compose_Alert_Guid'))}",
                                                         "body": {
-                                                            "escapedJsonOfWatchlistItemFields": "@{concat('{\"HalcyonAlertId\":\"', items('Foreach_Result')?['HalcyonAlertId'], '\",\"ProcessedTime\":\"', utcNow(), '\"}}')}"
+                                                            "HalcyonAlertId": "@{items('Foreach_Result')?['HalcyonAlertId']}",
+                                                            "ProcessedTime": "@{utcNow()}"
                                                         },
                                                         "retryPolicy": {
                                                             "type": "fixed",
@@ -286,27 +320,28 @@
                                                     }
                                                 },
                                                 "Create_Incident": {
-                                                    "type": "ApiConnection",
+                                                    "type": "Http",
                                                     "runAfter": {
                                                         "Add_To_Watchlist": ["Succeeded"]
                                                     },
                                                     "inputs": {
-                                                        "host": {
-                                                            "connection": {
-                                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                        "method": "PUT",
+                                                        "uri": "@{concat(parameters('armEndpoint'), 'subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/incidents/', outputs('Compose_Alert_Guid'), '?api-version=2024-03-01')}",
+                                                        "headers": {
+                                                            "Content-Type": "application/json"
+                                                        },
+                                                        "body": {
+                                                            "properties": {
+                                                                "title": "@{concat('Halcyon Alert: ', items('Foreach_Result')?['HalcyonAlertId'])}",
+                                                                "description": "@{concat(coalesce(items('Foreach_Result')?['message'], ''), '.\n\nHalcyon detection for alert ID `', items('Foreach_Result')?['HalcyonAlertId'], '`.\n\nTo see related events, run this query in Logs:\n\nHalcyonEvents_CL\n | extend HalcyonAlertId = tostring(parse_json(unmapped)[''halcyon_alert_id''])\n | where HalcyonAlertId == ''', items('Foreach_Result')?['HalcyonAlertId'], '''')}",
+                                                                "severity": "High",
+                                                                "status": "New",
+                                                                "labels": "@outputs('Compose_Labels')"
                                                             }
                                                         },
-                                                        "method": "put",
-                                                        "path": "/Incidents",
-                                                        "body": {
-                                                            "incidentArmId": "@{concat('/subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/incidents/', guid(items('Foreach_Result')?['HalcyonAlertId']))}",
-                                                            "title": "@{concat('Halcyon Alert: ', items('Foreach_Result')?['HalcyonAlertId'])}",
-                                                            "description": "@{concat(coalesce(items('Foreach_Result')?['message'], ''), '.\n\nHalcyon detection for alert ID `', items('Foreach_Result')?['HalcyonAlertId'], '`.\n\nTo see related events, run this query in Logs:\n\nHalcyonEvents_CL\n | extend HalcyonAlertId = tostring(parse_json(unmapped)[''halcyon_alert_id''])\n | where HalcyonAlertId == ''', items('Foreach_Result')?['HalcyonAlertId'], '''')}",
-                                                            "severity": "High",
-                                                            "status": "New",
-                                                            "tagsToAdd": {
-                                                                "TagsToAdd": [{ "Tag": "Halcyon" }]
-                                                            }
+                                                        "authentication": {
+                                                            "type": "ManagedServiceIdentity",
+                                                            "audience": "@{parameters('armEndpoint')}"
                                                         },
                                                         "retryPolicy": {
                                                             "type": "fixed",
@@ -356,13 +391,13 @@
         {
             "type": "Microsoft.Authorization/roleAssignments",
             "apiVersion": "2022-04-01",
-            "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName')), resourceId('Microsoft.Logic/workflows', parameters('PlaybookName')), variables('sentinelResponderRoleId'))]",
+            "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName')), resourceId('Microsoft.Logic/workflows', parameters('PlaybookName')), variables('sentinelContributorRoleId'))]",
             "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName'))]",
             "dependsOn": [
                 "[resourceId('Microsoft.Logic/workflows', parameters('PlaybookName'))]"
             ],
             "properties": {
-                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('sentinelResponderRoleId'))]",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('sentinelContributorRoleId'))]",
                 "principalId": "[reference(resourceId('Microsoft.Logic/workflows', parameters('PlaybookName')), '2019-05-01', 'Full').identity.principalId]",
                 "principalType": "ServicePrincipal"
             }

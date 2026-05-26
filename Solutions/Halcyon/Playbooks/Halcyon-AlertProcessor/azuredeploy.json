@@ -3,11 +3,11 @@
     "contentVersion": "1.0.0.0",
     "metadata": {
         "title": "Halcyon-AlertProcessor",
-        "description": "Polls Halcyon_Commands_CL every minute, deduplicates against a Sentinel watchlist, and creates Sentinel incidents directly via the REST API. Bypasses SecurityAlert ingestion lag that causes duplicate incidents with analytics rules.",
+        "description": "Polls SecurityAlert every minute, deduplicates against a Sentinel watchlist on HalcyonAlertId, creates Sentinel incidents via the ARM API, and best-effort links the discovering SecurityAlert.",
         "prerequisites": [
             "1. The Halcyon data connector must be deployed and ingesting data into Halcyon_Commands_CL.",
-            "2. The deploying principal must have permission to create role assignments on the Log Analytics workspace.",
-            "3. Disable the Halcyon - New Alert Detected analytics rule while this playbook is active to avoid duplicate incidents."
+            "2. The Halcyon analytics rule (Halcyon - New Alert Detected) must be deployed and emitting SecurityAlerts with entity mappings. The rule must have createIncident: false.",
+            "3. The deploying principal must have permission to create role assignments on the Log Analytics workspace."
         ],
         "tags": ["Halcyon", "AlertProcessor"],
         "author": { "name": "Halcyon" },
@@ -214,7 +214,7 @@
                                             "timerange": "Set in query"
                                         },
                                         "body": {
-                                            "query": "Halcyon_Commands_CL\n| where TimeGenerated > ago(2m)\n| summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n| project HalcyonAlertId, message, finding_info, evidences, device, HalcyonSourceTime, HalcyonTriageStatus, HalcyonDisplayStatus"
+                                            "query": "SecurityAlert\n| where TimeGenerated > ago(10m)\n| where AlertName has \"Halcyon\"\n| extend CustomDetails = parse_json(tostring(parse_json(tostring(ExtendedProperties))[\"Custom Details\"]))\n| extend HalcyonAlertId = tostring(CustomDetails[\"HalcyonAlertId\"][0])\n| where isnotempty(HalcyonAlertId)\n| summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n| project HalcyonAlertId, SystemAlertId, AlertName, TimeGenerated, Description, AlertSeverity"
                                         },
                                         "retryPolicy": {
                                             "type": "fixed",
@@ -238,26 +238,12 @@
                                             "runAfter": {},
                                             "inputs": "@{concat(substring(items('Foreach_Result')?['HalcyonAlertId'], 0, 8), '-', substring(items('Foreach_Result')?['HalcyonAlertId'], 8, 4), '-', '5', substring(items('Foreach_Result')?['HalcyonAlertId'], 13, 3), '-', 'a', substring(items('Foreach_Result')?['HalcyonAlertId'], 17, 3), '-', substring(items('Foreach_Result')?['HalcyonAlertId'], 20, 12))}"
                                         },
-                                        "Compose_Triage_Label": {
+                                        "Compose_Labels": {
                                             "type": "Compose",
                                             "runAfter": {
                                                 "Compose_Alert_Guid": ["Succeeded"]
                                             },
-                                            "inputs": "@if(empty(coalesce(items('Foreach_Result')?['HalcyonTriageStatus'], '')), createArray(), createArray(json(concat('{\"labelName\":\"Halcyon Triage Status: ', items('Foreach_Result')?['HalcyonTriageStatus'], '\"}'))))"
-                                        },
-                                        "Compose_Display_Label": {
-                                            "type": "Compose",
-                                            "runAfter": {
-                                                "Compose_Triage_Label": ["Succeeded"]
-                                            },
-                                            "inputs": "@if(empty(coalesce(items('Foreach_Result')?['HalcyonDisplayStatus'], '')), createArray(), createArray(json(concat('{\"labelName\":\"Halcyon Display Status: ', items('Foreach_Result')?['HalcyonDisplayStatus'], '\"}'))))"
-                                        },
-                                        "Compose_Labels": {
-                                            "type": "Compose",
-                                            "runAfter": {
-                                                "Compose_Display_Label": ["Succeeded"]
-                                            },
-                                            "inputs": "@union(createArray(json('{\"labelName\":\"Halcyon\"}')), outputs('Compose_Triage_Label'), outputs('Compose_Display_Label'))"
+                                            "inputs": [{ "labelName": "Halcyon" }]
                                         },
                                         "Read_Watchlist_Item": {
                                             "type": "ApiConnection",
@@ -333,7 +319,7 @@
                                                         "body": {
                                                             "properties": {
                                                                 "title": "@{concat('Halcyon Alert: ', items('Foreach_Result')?['HalcyonAlertId'])}",
-                                                                "description": "@{concat(coalesce(items('Foreach_Result')?['message'], ''), '.\n\nHalcyon detection for alert ID `', items('Foreach_Result')?['HalcyonAlertId'], '`.\n\nTo see related events, run this query in Logs:\n\nHalcyonEvents_CL\n | extend HalcyonAlertId = tostring(parse_json(unmapped)[''halcyon_alert_id''])\n | where HalcyonAlertId == ''', items('Foreach_Result')?['HalcyonAlertId'], '''')}",
+                                                                "description": "@{items('Foreach_Result')?['Description']}",
                                                                 "severity": "High",
                                                                 "status": "New",
                                                                 "labels": "@outputs('Compose_Labels')"
@@ -347,6 +333,36 @@
                                                             "type": "fixed",
                                                             "count": 3,
                                                             "interval": "PT10S"
+                                                        }
+                                                    }
+                                                },
+                                                "Link_Alert_Scope": {
+                                                    "type": "Scope",
+                                                    "runAfter": {
+                                                        "Create_Incident": ["Succeeded"]
+                                                    },
+                                                    "actions": {
+                                                        "Link_Alert_To_Incident": {
+                                                            "type": "ApiConnection",
+                                                            "runAfter": {},
+                                                            "inputs": {
+                                                                "host": {
+                                                                    "connection": {
+                                                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                                    }
+                                                                },
+                                                                "method": "post",
+                                                                "path": "/Incidents/Relation/Create",
+                                                                "body": {
+                                                                    "incidentArmId": "@{concat('/subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/incidents/', outputs('Compose_Alert_Guid'))}",
+                                                                    "relatedResourceId": "@{concat('/subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/entities/', items('Foreach_Result')?['SystemAlertId'])}"
+                                                                },
+                                                                "retryPolicy": {
+                                                                    "type": "fixed",
+                                                                    "count": 3,
+                                                                    "interval": "PT10S"
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 }

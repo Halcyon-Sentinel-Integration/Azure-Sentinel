@@ -1,0 +1,928 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "metadata": {
+        "title": "Halcyon-AlertsSync",
+        "description": "Combined Logic App playbook that handles the full Halcyon alert lifecycle on a single 1-minute cadence. First creates Sentinel incidents from new Halcyon-attributed SecurityAlerts (deduplicated via watchlist on HalcyonAlertId), then syncs open Halcyon incidents with the latest alert state (alert swap, label sync, close-if-reviewed) and recovers orphaned incidents. This playbook replaces the legacy Halcyon-AlertProcessor and Halcyon-IncidentUpdate playbooks, which should be disabled and removed before deploying this one.",
+        "prerequisites": [
+            "1. The Halcyon data connector must be deployed and ingesting data into Halcyon_Commands_CL.",
+            "2. The Halcyon analytics rule (Halcyon - New Alert Detected) must be deployed with createIncident: false and entity mappings configured. The rule must include the leftanti join against the HalcyonProcessedIds watchlist.",
+            "3. The legacy Halcyon-AlertProcessor and Halcyon-IncidentUpdate playbooks must be disabled before deploying this playbook (to avoid duplicate work and watchlist contention).",
+            "4. The deploying principal must have permission to create role assignments on the Log Analytics workspace."
+        ],
+        "tags": ["Halcyon", "AlertsSync"],
+        "author": { "name": "Halcyon" },
+        "support": { "tier": "developer", "link": "https://www.halcyon.ai" }
+    },
+    "parameters": {
+        "PlaybookName": {
+            "type": "string",
+            "defaultValue": "Halcyon-AlertsSync"
+        },
+        "WorkspaceName": {
+            "type": "string",
+            "metadata": { "description": "Name of the Log Analytics workspace containing Halcyon_Commands_CL and Microsoft Sentinel." }
+        },
+        "SubscriptionId": {
+            "type": "string",
+            "defaultValue": "[subscription().subscriptionId]"
+        },
+        "ResourceGroupName": {
+            "type": "string",
+            "defaultValue": "[resourceGroup().name]"
+        },
+        "WatchlistAlias": {
+            "type": "string",
+            "defaultValue": "HalcyonProcessedIds",
+            "metadata": { "description": "Alias of the Sentinel watchlist used to track already-processed HalcyonAlertIds." }
+        },
+        "RecurrenceFrequency": {
+            "type": "string",
+            "defaultValue": "Minute",
+            "allowedValues": ["Minute", "Hour"],
+            "metadata": { "description": "Frequency unit for the recurrence trigger. Serves both the AlertProcessor and IncidentUpdate halves of the workflow." }
+        },
+        "RecurrenceInterval": {
+            "type": "int",
+            "defaultValue": 1,
+            "metadata": { "description": "How often to run, in units of RecurrenceFrequency. Default 1 minute serves both halves." }
+        }
+    },
+    "variables": {
+        "sentinelContributorRoleId": "ab8e14d6-4a74-4a29-9ba8-549422addade",
+        "logAnalyticsReaderRoleId": "73c42c96-874c-492b-b04d-ab87d138a893",
+        "monitoringReaderRoleId": "43d0d8ad-25c7-4714-9337-8ba259a9fe05",
+        "azureMonitorLogsConnectionName": "[concat('azuremonitorlogs-', parameters('PlaybookName'))]",
+        "azureSentinelConnectionName": "[concat('azuresentinel-', parameters('PlaybookName'))]"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Web/connections",
+            "apiVersion": "2016-06-01",
+            "name": "[variables('azureMonitorLogsConnectionName')]",
+            "location": "[resourceGroup().location]",
+            "kind": "V1",
+            "properties": {
+                "displayName": "[variables('azureMonitorLogsConnectionName')]",
+                "customParameterValues": {},
+                "parameterValueSet": {
+                    "name": "managedIdentityAuth",
+                    "values": {}
+                },
+                "api": {
+                    "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azuremonitorlogs')]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Web/connections",
+            "apiVersion": "2016-06-01",
+            "name": "[variables('azureSentinelConnectionName')]",
+            "location": "[resourceGroup().location]",
+            "kind": "V1",
+            "properties": {
+                "displayName": "[variables('azureSentinelConnectionName')]",
+                "customParameterValues": {},
+                "parameterValueType": "Alternative",
+                "api": {
+                    "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azuresentinel')]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.OperationalInsights/workspaces/providers/watchlists",
+            "apiVersion": "2023-12-01-preview",
+            "name": "[concat(parameters('WorkspaceName'), '/Microsoft.SecurityInsights/', parameters('WatchlistAlias'))]",
+            "properties": {
+                "displayName": "Halcyon Processed Alert IDs",
+                "description": "Tracks HalcyonAlertIds that have been processed by the Halcyon-AlertsSync playbook to prevent duplicate incidents.",
+                "provider": "Halcyon Solution",
+                "source": "Local file",
+                "itemsSearchKey": "HalcyonAlertId",
+                "contentType": "Text/Csv",
+                "numberOfLinesToSkip": 0,
+                "rawContent": "HalcyonAlertId,ProcessedTime\n"
+            }
+        },
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2019-05-01",
+            "name": "[parameters('PlaybookName')]",
+            "location": "[resourceGroup().location]",
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/connections', variables('azureMonitorLogsConnectionName'))]",
+                "[resourceId('Microsoft.Web/connections', variables('azureSentinelConnectionName'))]",
+                "[resourceId('Microsoft.OperationalInsights/workspaces/providers/watchlists', parameters('WorkspaceName'), 'Microsoft.SecurityInsights', parameters('WatchlistAlias'))]"
+            ],
+            "properties": {
+                "state": "Enabled",
+                "parameters": {
+                    "$connections": {
+                        "value": {
+                            "azuremonitorlogs": {
+                                "connectionId": "[resourceId('Microsoft.Web/connections', variables('azureMonitorLogsConnectionName'))]",
+                                "connectionName": "[variables('azureMonitorLogsConnectionName')]",
+                                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azuremonitorlogs')]",
+                                "connectionProperties": {
+                                    "authentication": {
+                                        "type": "ManagedServiceIdentity"
+                                    }
+                                }
+                            },
+                            "azuresentinel": {
+                                "connectionId": "[resourceId('Microsoft.Web/connections', variables('azureSentinelConnectionName'))]",
+                                "connectionName": "[variables('azureSentinelConnectionName')]",
+                                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azuresentinel')]",
+                                "connectionProperties": {
+                                    "authentication": {
+                                        "type": "ManagedServiceIdentity"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "$connections": {
+                            "defaultValue": {},
+                            "type": "Object"
+                        },
+                        "subscriptionId": {
+                            "type": "string",
+                            "defaultValue": "[parameters('SubscriptionId')]"
+                        },
+                        "resourceGroupName": {
+                            "type": "string",
+                            "defaultValue": "[parameters('ResourceGroupName')]"
+                        },
+                        "workspaceName": {
+                            "type": "string",
+                            "defaultValue": "[parameters('WorkspaceName')]"
+                        },
+                        "workspaceId": {
+                            "type": "string",
+                            "defaultValue": "[reference(resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName')), '2022-10-01').customerId]"
+                        },
+                        "watchlistAlias": {
+                            "type": "string",
+                            "defaultValue": "[parameters('WatchlistAlias')]"
+                        },
+                        "armEndpoint": {
+                            "type": "string",
+                            "defaultValue": "[environment().resourceManager]"
+                        }
+                    },
+                    "triggers": {
+                        "Recurrence": {
+                            "type": "Recurrence",
+                            "recurrence": {
+                                "frequency": "[parameters('RecurrenceFrequency')]",
+                                "interval": "[parameters('RecurrenceInterval')]"
+                            },
+                            "runtimeConfiguration": {
+                                "concurrency": {
+                                    "runs": 1
+                                }
+                            }
+                        }
+                    },
+                    "actions": {
+                        "Main_Scope": {
+                            "type": "Scope",
+                            "runAfter": {},
+                            "actions": {
+                                "AlertProcessor_Scope": {
+                                    "type": "Scope",
+                                    "runAfter": {},
+                                    "actions": {
+                                        "Run_AlertProcessor_KQL": {
+                                            "type": "ApiConnection",
+                                            "runAfter": {},
+                                            "inputs": {
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['azuremonitorlogs']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "post",
+                                                "path": "/queryData",
+                                                "queries": {
+                                                    "subscriptions": "@parameters('subscriptionId')",
+                                                    "resourcegroups": "@parameters('resourceGroupName')",
+                                                    "resourcetype": "Log Analytics Workspace",
+                                                    "resourcename": "@parameters('workspaceName')",
+                                                    "timerange": "Set in query"
+                                                },
+                                                "body": {
+                                                    "query": "SecurityAlert\n| where TimeGenerated > ago(10m)\n| where AlertName has \"Halcyon\"\n| extend CustomDetails = parse_json(tostring(parse_json(tostring(ExtendedProperties))[\"Custom Details\"]))\n| extend HalcyonAlertId = tostring(CustomDetails[\"HalcyonAlertId\"][0])\n| where isnotempty(HalcyonAlertId)\n| summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n| project HalcyonAlertId, SystemAlertId, AlertName, TimeGenerated, Description, AlertSeverity"
+                                                },
+                                                "retryPolicy": {
+                                                    "type": "fixed",
+                                                    "count": 3,
+                                                    "interval": "PT10S"
+                                                }
+                                            }
+                                        },
+                                        "Foreach_Result": {
+                                            "type": "Foreach",
+                                            "runAfter": {
+                                                "Run_AlertProcessor_KQL": ["Succeeded"]
+                                            },
+                                            "foreach": "@body('Run_AlertProcessor_KQL')?['value']",
+                                            "runtimeConfiguration": {
+                                                "concurrency": { "repetitions": 1 }
+                                            },
+                                            "actions": {
+                                                "Compose_Alert_Guid": {
+                                                    "type": "Compose",
+                                                    "runAfter": {},
+                                                    "inputs": "@{concat(substring(items('Foreach_Result')?['HalcyonAlertId'], 0, 8), '-', substring(items('Foreach_Result')?['HalcyonAlertId'], 8, 4), '-', '5', substring(items('Foreach_Result')?['HalcyonAlertId'], 13, 3), '-', 'a', substring(items('Foreach_Result')?['HalcyonAlertId'], 17, 3), '-', substring(items('Foreach_Result')?['HalcyonAlertId'], 20, 12))}"
+                                                },
+                                                "Compose_Labels": {
+                                                    "type": "Compose",
+                                                    "runAfter": {
+                                                        "Compose_Alert_Guid": ["Succeeded"]
+                                                    },
+                                                    "inputs": [{ "labelName": "Halcyon" }]
+                                                },
+                                                "Read_Watchlist_Item": {
+                                                    "type": "ApiConnection",
+                                                    "runAfter": {
+                                                        "Compose_Alert_Guid": ["Succeeded"]
+                                                    },
+                                                    "inputs": {
+                                                        "host": {
+                                                            "connection": {
+                                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                            }
+                                                        },
+                                                        "method": "get",
+                                                        "path": "/Watchlists/subscriptions/@{encodeURIComponent(parameters('subscriptionId'))}/resourceGroups/@{encodeURIComponent(parameters('resourceGroupName'))}/workspaces/@{encodeURIComponent(parameters('workspaceId'))}/watchlists/@{encodeURIComponent(parameters('watchlistAlias'))}/watchlistItem/@{encodeURIComponent(outputs('Compose_Alert_Guid'))}"
+                                                    }
+                                                },
+                                                "Check_If_Already_Processed": {
+                                                    "type": "If",
+                                                    "runAfter": {
+                                                        "Read_Watchlist_Item": ["Succeeded", "Failed"],
+                                                        "Compose_Labels": ["Succeeded"]
+                                                    },
+                                                    "expression": {
+                                                        "or": [
+                                                            {
+                                                                "equals": [
+                                                                    "@coalesce(outputs('Read_Watchlist_Item')?['statusCode'], 404)",
+                                                                    404
+                                                                ]
+                                                            },
+                                                            {
+                                                                "equals": [
+                                                                    "@actions('Read_Watchlist_Item')?['status']",
+                                                                    "Failed"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    "actions": {
+                                                        "Add_To_Watchlist": {
+                                                            "type": "ApiConnection",
+                                                            "runAfter": {},
+                                                            "inputs": {
+                                                                "host": {
+                                                                    "connection": {
+                                                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                                    }
+                                                                },
+                                                                "method": "put",
+                                                                "path": "/Watchlists/subscriptions/@{encodeURIComponent(parameters('subscriptionId'))}/resourceGroups/@{encodeURIComponent(parameters('resourceGroupName'))}/workspaces/@{encodeURIComponent(parameters('workspaceId'))}/watchlists/@{encodeURIComponent(parameters('watchlistAlias'))}/watchlistItem/@{encodeURIComponent(outputs('Compose_Alert_Guid'))}",
+                                                                "body": {
+                                                                    "HalcyonAlertId": "@{items('Foreach_Result')?['HalcyonAlertId']}",
+                                                                    "ProcessedTime": "@{utcNow()}"
+                                                                },
+                                                                "retryPolicy": {
+                                                                    "type": "fixed",
+                                                                    "count": 3,
+                                                                    "interval": "PT10S"
+                                                                }
+                                                            }
+                                                        },
+                                                        "Create_Incident": {
+                                                            "type": "Http",
+                                                            "runAfter": {
+                                                                "Add_To_Watchlist": ["Succeeded"]
+                                                            },
+                                                            "inputs": {
+                                                                "method": "PUT",
+                                                                "uri": "@{concat(parameters('armEndpoint'), 'subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/incidents/', outputs('Compose_Alert_Guid'), '?api-version=2024-03-01')}",
+                                                                "headers": {
+                                                                    "Content-Type": "application/json"
+                                                                },
+                                                                "body": {
+                                                                    "properties": {
+                                                                        "title": "@{concat('Halcyon Alert: ', items('Foreach_Result')?['HalcyonAlertId'])}",
+                                                                        "description": "@{items('Foreach_Result')?['Description']}",
+                                                                        "severity": "High",
+                                                                        "status": "New",
+                                                                        "labels": "@outputs('Compose_Labels')"
+                                                                    }
+                                                                },
+                                                                "authentication": {
+                                                                    "type": "ManagedServiceIdentity",
+                                                                    "audience": "@{parameters('armEndpoint')}"
+                                                                },
+                                                                "retryPolicy": {
+                                                                    "type": "fixed",
+                                                                    "count": 3,
+                                                                    "interval": "PT10S"
+                                                                }
+                                                            }
+                                                        },
+                                                        "Link_Alert_Scope": {
+                                                            "type": "Scope",
+                                                            "runAfter": {
+                                                                "Create_Incident": ["Succeeded"]
+                                                            },
+                                                            "actions": {
+                                                                "Link_Alert_To_Incident": {
+                                                                    "type": "ApiConnection",
+                                                                    "runAfter": {},
+                                                                    "inputs": {
+                                                                        "host": {
+                                                                            "connection": {
+                                                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                                            }
+                                                                        },
+                                                                        "method": "post",
+                                                                        "path": "/Incidents/Relation/Create",
+                                                                        "body": {
+                                                                            "incidentArmId": "@{concat('/subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/incidents/', outputs('Compose_Alert_Guid'))}",
+                                                                            "relatedResourceId": "@{concat('/subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/entities/', items('Foreach_Result')?['SystemAlertId'])}"
+                                                                        },
+                                                                        "retryPolicy": {
+                                                                            "type": "fixed",
+                                                                            "count": 3,
+                                                                            "interval": "PT10S"
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    },
+                                                    "else": {
+                                                        "actions": {}
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "IncidentUpdate_Scope": {
+                                    "type": "Scope",
+                                    "runAfter": {
+                                        "AlertProcessor_Scope": ["Succeeded", "Failed"]
+                                    },
+                                    "actions": {
+                                        "Run_Update_KQL": {
+                                            "type": "ApiConnection",
+                                            "runAfter": {},
+                                            "inputs": {
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['azuremonitorlogs']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "post",
+                                                "path": "/queryData",
+                                                "queries": {
+                                                    "subscriptions": "@parameters('subscriptionId')",
+                                                    "resourcegroups": "@parameters('resourceGroupName')",
+                                                    "resourcetype": "Log Analytics Workspace",
+                                                    "resourcename": "@parameters('workspaceName')",
+                                                    "timerange": "Set in query"
+                                                },
+                                                "body": {
+                                                    "query": "let SettledAlerts = materialize(\n    Halcyon_Commands_CL\n    | summarize FirstSeen = min(TimeGenerated) by HalcyonAlertId\n    | where FirstSeen < ago(15m)\n);\nlet LatestStatus = materialize(\n    Halcyon_Commands_CL\n    | where TimeGenerated > ago(15m)\n    | where HalcyonAlertId in (SettledAlerts | project HalcyonAlertId)\n    | summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n    | project HalcyonAlertId, HalcyonTriageStatus, HalcyonDisplayStatus\n);\nlet HalcyonAlerts = materialize(\n    SecurityAlert\n    | where TimeGenerated > ago(24h)\n    | where AlertName has \"Halcyon\"\n    | extend CustomDetails = parse_json(tostring(parse_json(tostring(ExtendedProperties))[\"Custom Details\"]))\n    | extend HalcyonAlertId = tostring(CustomDetails[\"HalcyonAlertId\"][0])\n    | where isnotempty(HalcyonAlertId)\n    | summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n    | project HalcyonAlertId, NewestSystemAlertId = SystemAlertId\n);\nSecurityIncident\n| where Labels has_cs \"Halcyon\"\n| summarize arg_max(TimeGenerated, *) by IncidentNumber\n| where Status != \"Closed\"\n| extend CurrentlyLinkedAlertId = tostring(AlertIds[0])\n| join kind=inner (\n    SecurityAlert\n    | where AlertName has \"Halcyon\"\n    | extend CustomDetails = parse_json(tostring(parse_json(tostring(ExtendedProperties))[\"Custom Details\"]))\n    | extend HalcyonAlertId = tostring(CustomDetails[\"HalcyonAlertId\"][0])\n    | project SystemAlertId, HalcyonAlertId\n) on $left.CurrentlyLinkedAlertId == $right.SystemAlertId\n| join kind=inner HalcyonAlerts on HalcyonAlertId\n| join kind=inner LatestStatus on HalcyonAlertId\n| project\n    IncidentId = IncidentName,\n    HalcyonAlertId,\n    CurrentlyLinkedAlertId,\n    NewestSystemAlertId,\n    NeedsAlertSwap = (CurrentlyLinkedAlertId != NewestSystemAlertId),\n    HalcyonTriageStatus,\n    HalcyonDisplayStatus"
+                                                },
+                                                "retryPolicy": {
+                                                    "type": "fixed",
+                                                    "count": 3,
+                                                    "interval": "PT10S"
+                                                }
+                                            }
+                                        },
+                                        "Check_Result_Size": {
+                                            "type": "If",
+                                            "runAfter": {
+                                                "Run_Update_KQL": ["Succeeded"]
+                                            },
+                                            "expression": {
+                                                "and": [
+                                                    {
+                                                        "greater": [
+                                                            "@length(body('Run_Update_KQL')?['value'])",
+                                                            100
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            "actions": {
+                                                "Terminate_Too_Many_Rows": {
+                                                    "type": "Terminate",
+                                                    "runAfter": {},
+                                                    "inputs": {
+                                                        "runStatus": "Failed",
+                                                        "runError": {
+                                                            "code": "TooManyRows",
+                                                            "message": "@{concat('KQL returned ', length(body('Run_Update_KQL')?['value']), ' rows — circuit breaker tripped (limit 100). Investigate for duplicate data before re-enabling.')}"
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            "else": {
+                                                "actions": {}
+                                            }
+                                        },
+                                        "For_Each_Alert": {
+                                            "type": "Foreach",
+                                            "runAfter": {
+                                                "Check_Result_Size": ["Succeeded"]
+                                            },
+                                            "foreach": "@body('Run_Update_KQL')?['value']",
+                                            "runtimeConfiguration": {
+                                                "concurrency": { "repetitions": 1 }
+                                            },
+                                            "actions": {
+                                                "Compose_Incident_Arm_Id": {
+                                                    "type": "Compose",
+                                                    "runAfter": {},
+                                                    "inputs": "@concat('/subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/incidents/', items('For_Each_Alert')?['IncidentId'])"
+                                                },
+                                                "Alert_Swap_Scope": {
+                                                    "type": "Scope",
+                                                    "runAfter": {
+                                                        "Compose_Incident_Arm_Id": ["Succeeded"]
+                                                    },
+                                                    "actions": {
+                                                        "Check_Needs_Alert_Swap": {
+                                                            "type": "If",
+                                                            "runAfter": {},
+                                                            "expression": {
+                                                                "and": [
+                                                                    {
+                                                                        "equals": [
+                                                                            "@items('For_Each_Alert')?['NeedsAlertSwap']",
+                                                                            true
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "actions": {
+                                                                "Compose_Old_Alert_Arm_Id": {
+                                                                    "type": "Compose",
+                                                                    "runAfter": {},
+                                                                    "inputs": "@{concat('/subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/entities/', items('For_Each_Alert')?['CurrentlyLinkedAlertId'])}"
+                                                                },
+                                                                "List_Incident_Relations": {
+                                                                    "type": "Http",
+                                                                    "runAfter": {
+                                                                        "Compose_Old_Alert_Arm_Id": ["Succeeded"]
+                                                                    },
+                                                                    "inputs": {
+                                                                        "method": "GET",
+                                                                        "uri": "@{concat(parameters('armEndpoint'), 'subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/incidents/', items('For_Each_Alert')?['IncidentId'], '/relations?api-version=2024-03-01')}",
+                                                                        "authentication": {
+                                                                            "type": "ManagedServiceIdentity",
+                                                                            "audience": "@{parameters('armEndpoint')}"
+                                                                        },
+                                                                        "retryPolicy": {
+                                                                            "type": "fixed",
+                                                                            "count": 3,
+                                                                            "interval": "PT10S"
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "Filter_Relations_For_Old_Alert": {
+                                                                    "type": "Query",
+                                                                    "runAfter": {
+                                                                        "List_Incident_Relations": ["Succeeded"]
+                                                                    },
+                                                                    "inputs": {
+                                                                        "from": "@coalesce(body('List_Incident_Relations')?['value'], createArray())",
+                                                                        "where": "@equals(coalesce(item()?['properties']?['relatedResourceName'], ''), items('For_Each_Alert')?['CurrentlyLinkedAlertId'])"
+                                                                    }
+                                                                },
+                                                                "For_Each_Stale_Relation": {
+                                                                    "type": "Foreach",
+                                                                    "runAfter": {
+                                                                        "Filter_Relations_For_Old_Alert": ["Succeeded"]
+                                                                    },
+                                                                    "foreach": "@body('Filter_Relations_For_Old_Alert')",
+                                                                    "runtimeConfiguration": {
+                                                                        "concurrency": { "repetitions": 1 }
+                                                                    },
+                                                                    "actions": {
+                                                                        "Delete_Relation_By_Name": {
+                                                                            "type": "Http",
+                                                                            "runAfter": {},
+                                                                            "inputs": {
+                                                                                "method": "DELETE",
+                                                                                "uri": "@{concat(parameters('armEndpoint'), 'subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/incidents/', items('For_Each_Alert')?['IncidentId'], '/relations/', items('For_Each_Stale_Relation')?['name'], '?api-version=2024-03-01')}",
+                                                                                "authentication": {
+                                                                                    "type": "ManagedServiceIdentity",
+                                                                                    "audience": "@{parameters('armEndpoint')}"
+                                                                                },
+                                                                                "retryPolicy": {
+                                                                                    "type": "fixed",
+                                                                                    "count": 3,
+                                                                                    "interval": "PT10S"
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "Compose_New_Alert_Arm_Id": {
+                                                                    "type": "Compose",
+                                                                    "runAfter": {
+                                                                        "For_Each_Stale_Relation": ["Succeeded"]
+                                                                    },
+                                                                    "inputs": "@{concat('/subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/entities/', items('For_Each_Alert')?['NewestSystemAlertId'])}"
+                                                                },
+                                                                "Link_New_Alert": {
+                                                                    "type": "ApiConnection",
+                                                                    "runAfter": {
+                                                                        "Compose_New_Alert_Arm_Id": ["Succeeded"]
+                                                                    },
+                                                                    "inputs": {
+                                                                        "host": {
+                                                                            "connection": {
+                                                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                                            }
+                                                                        },
+                                                                        "method": "post",
+                                                                        "path": "/Incidents/Relation/Create",
+                                                                        "body": {
+                                                                            "incidentArmId": "@{outputs('Compose_Incident_Arm_Id')}",
+                                                                            "relatedResourceId": "@{outputs('Compose_New_Alert_Arm_Id')}"
+                                                                        },
+                                                                        "retryPolicy": {
+                                                                            "type": "fixed",
+                                                                            "count": 3,
+                                                                            "interval": "PT10S"
+                                                                        }
+                                                                    }
+                                                                }
+                                                            },
+                                                            "else": {
+                                                                "actions": {}
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                "Label_Sync_Scope": {
+                                                    "type": "Scope",
+                                                    "runAfter": {
+                                                        "Alert_Swap_Scope": ["Succeeded", "Failed"]
+                                                    },
+                                                    "actions": {
+                                                        "Get_Incident": {
+                                                            "type": "ApiConnection",
+                                                            "runAfter": {},
+                                                            "inputs": {
+                                                                "host": {
+                                                                    "connection": {
+                                                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                                    }
+                                                                },
+                                                                "method": "post",
+                                                                "path": "/Incidents",
+                                                                "body": {
+                                                                    "incidentArmId": "@{outputs('Compose_Incident_Arm_Id')}"
+                                                                },
+                                                                "retryPolicy": {
+                                                                    "type": "fixed",
+                                                                    "count": 3,
+                                                                    "interval": "PT10S"
+                                                                }
+                                                            }
+                                                        },
+                                                        "Filter_Labels_To_Remove": {
+                                                            "type": "Query",
+                                                            "runAfter": {
+                                                                "Get_Incident": ["Succeeded"]
+                                                            },
+                                                            "inputs": {
+                                                                "from": "@coalesce(body('Get_Incident')?['properties']?['labels'], createArray())",
+                                                                "where": "@or(startsWith(coalesce(item()?['labelName'], ''), 'Halcyon Triage Status:'), startsWith(coalesce(item()?['labelName'], ''), 'Halcyon Display Status:'))"
+                                                            }
+                                                        },
+                                                        "Compose_Triage_Label": {
+                                                            "type": "Compose",
+                                                            "runAfter": {
+                                                                "Filter_Labels_To_Remove": ["Succeeded"]
+                                                            },
+                                                            "inputs": "@if(empty(coalesce(items('For_Each_Alert')?['HalcyonTriageStatus'], '')), createArray(), createArray(json(concat('{\"Tag\":\"Halcyon Triage Status: ', items('For_Each_Alert')?['HalcyonTriageStatus'], '\"}'))))"
+                                                        },
+                                                        "Compose_Display_Label": {
+                                                            "type": "Compose",
+                                                            "runAfter": {
+                                                                "Compose_Triage_Label": ["Succeeded"]
+                                                            },
+                                                            "inputs": "@if(empty(coalesce(items('For_Each_Alert')?['HalcyonDisplayStatus'], '')), createArray(), createArray(json(concat('{\"Tag\":\"Halcyon Display Status: ', items('For_Each_Alert')?['HalcyonDisplayStatus'], '\"}'))))"
+                                                        },
+                                                        "Compose_Tags_To_Add": {
+                                                            "type": "Compose",
+                                                            "runAfter": {
+                                                                "Compose_Display_Label": ["Succeeded"]
+                                                            },
+                                                            "inputs": "@union(outputs('Compose_Triage_Label'), outputs('Compose_Display_Label'))"
+                                                        },
+                                                        "Compose_Tags_To_Remove": {
+                                                            "type": "Select",
+                                                            "runAfter": {
+                                                                "Compose_Tags_To_Add": ["Succeeded"]
+                                                            },
+                                                            "inputs": {
+                                                                "from": "@body('Filter_Labels_To_Remove')",
+                                                                "select": {
+                                                                    "Tag": "@item()?['labelName']"
+                                                                }
+                                                            }
+                                                        },
+                                                        "Update_Incident": {
+                                                            "type": "ApiConnection",
+                                                            "runAfter": {
+                                                                "Compose_Tags_To_Remove": ["Succeeded"]
+                                                            },
+                                                            "inputs": {
+                                                                "host": {
+                                                                    "connection": {
+                                                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                                    }
+                                                                },
+                                                                "method": "put",
+                                                                "path": "/Incidents",
+                                                                "body": {
+                                                                    "incidentArmId": "@{outputs('Compose_Incident_Arm_Id')}",
+                                                                    "tagsToAdd": {
+                                                                        "TagsToAdd": "@outputs('Compose_Tags_To_Add')"
+                                                                    },
+                                                                    "tagsToRemove": {
+                                                                        "TagsToRemove": "@body('Compose_Tags_To_Remove')"
+                                                                    }
+                                                                },
+                                                                "retryPolicy": {
+                                                                    "type": "fixed",
+                                                                    "count": 3,
+                                                                    "interval": "PT10S"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                "Close_If_Reviewed": {
+                                                    "type": "Scope",
+                                                    "runAfter": {
+                                                        "Label_Sync_Scope": ["Succeeded", "Failed"]
+                                                    },
+                                                    "actions": {
+                                                        "Check_Is_Reviewed": {
+                                                            "type": "If",
+                                                            "runAfter": {},
+                                                            "expression": {
+                                                                "and": [
+                                                                    {
+                                                                        "equals": [
+                                                                            "@items('For_Each_Alert')?['HalcyonTriageStatus']",
+                                                                            "Reviewed"
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "actions": {
+                                                                "Close_Incident": {
+                                                                    "type": "ApiConnection",
+                                                                    "runAfter": {},
+                                                                    "inputs": {
+                                                                        "host": {
+                                                                            "connection": {
+                                                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                                            }
+                                                                        },
+                                                                        "method": "put",
+                                                                        "path": "/Incidents",
+                                                                        "body": {
+                                                                            "incidentArmId": "@{outputs('Compose_Incident_Arm_Id')}",
+                                                                            "status": "Closed",
+                                                                            "classification": {
+                                                                                "ClassificationAndReason": "Undetermined"
+                                                                            },
+                                                                            "classificationComment": "Closed by Halcyon: alert reviewed in Halcyon platform."
+                                                                        },
+                                                                        "retryPolicy": {
+                                                                            "type": "fixed",
+                                                                            "count": 3,
+                                                                            "interval": "PT5S"
+                                                                        }
+                                                                    }
+                                                                }
+                                                            },
+                                                            "else": {
+                                                                "actions": {}
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        "Run_Orphan_KQL_Query": {
+                                            "type": "ApiConnection",
+                                            "runAfter": {
+                                                "For_Each_Alert": ["Succeeded"]
+                                            },
+                                            "inputs": {
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['azuremonitorlogs']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "post",
+                                                "path": "/queryData",
+                                                "queries": {
+                                                    "subscriptions": "@parameters('subscriptionId')",
+                                                    "resourcegroups": "@parameters('resourceGroupName')",
+                                                    "resourcetype": "Log Analytics Workspace",
+                                                    "resourcename": "@parameters('workspaceName')",
+                                                    "timerange": "Set in query"
+                                                },
+                                                "body": {
+                                                    "query": "let HalcyonAlerts = materialize(\n    SecurityAlert\n    | where TimeGenerated > ago(24h)\n    | where AlertName has \"Halcyon\"\n    | extend CustomDetails = parse_json(tostring(parse_json(tostring(ExtendedProperties))[\"Custom Details\"]))\n    | extend HalcyonAlertId = tostring(CustomDetails[\"HalcyonAlertId\"][0])\n    | where isnotempty(HalcyonAlertId)\n    | summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n    | project HalcyonAlertId, NewestSystemAlertId = SystemAlertId\n);\nSecurityIncident\n| where Labels has_cs \"Halcyon\"\n| summarize arg_max(TimeGenerated, *) by IncidentNumber\n| where Status != \"Closed\"\n| where array_length(AlertIds) == 0\n| extend HalcyonAlertId = extract(@\"Halcyon Alert: ([0-9a-f]{64})\", 1, Title)\n| where isnotempty(HalcyonAlertId)\n| join kind=inner HalcyonAlerts on HalcyonAlertId\n| project IncidentId = IncidentName, HalcyonAlertId, NewestSystemAlertId"
+                                                },
+                                                "retryPolicy": {
+                                                    "type": "fixed",
+                                                    "count": 3,
+                                                    "interval": "PT10S"
+                                                }
+                                            }
+                                        },
+                                        "Check_Orphan_Result_Size": {
+                                            "type": "If",
+                                            "runAfter": {
+                                                "Run_Orphan_KQL_Query": ["Succeeded"]
+                                            },
+                                            "expression": {
+                                                "and": [
+                                                    {
+                                                        "greater": [
+                                                            "@length(body('Run_Orphan_KQL_Query')?['value'])",
+                                                            50
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            "actions": {
+                                                "Terminate_Too_Many_Orphan_Rows": {
+                                                    "type": "Terminate",
+                                                    "runAfter": {},
+                                                    "inputs": {
+                                                        "runStatus": "Failed",
+                                                        "runError": {
+                                                            "code": "TooManyOrphanRows",
+                                                            "message": "@{concat('Orphan KQL returned ', length(body('Run_Orphan_KQL_Query')?['value']), ' rows — circuit breaker tripped (limit 50). Investigate for unexpected orphaned incidents.')}"
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            "else": {
+                                                "actions": {}
+                                            }
+                                        },
+                                        "For_Each_Orphan": {
+                                            "type": "Foreach",
+                                            "runAfter": {
+                                                "Check_Orphan_Result_Size": ["Succeeded"]
+                                            },
+                                            "foreach": "@body('Run_Orphan_KQL_Query')?['value']",
+                                            "runtimeConfiguration": {
+                                                "concurrency": { "repetitions": 1 }
+                                            },
+                                            "actions": {
+                                                "Compose_Orphan_Incident_Arm_Id": {
+                                                    "type": "Compose",
+                                                    "runAfter": {},
+                                                    "inputs": "@concat('/subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/incidents/', items('For_Each_Orphan')?['IncidentId'])"
+                                                },
+                                                "Compose_Orphan_Alert_Arm_Id": {
+                                                    "type": "Compose",
+                                                    "runAfter": {
+                                                        "Compose_Orphan_Incident_Arm_Id": ["Succeeded"]
+                                                    },
+                                                    "inputs": "@{concat('/subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/entities/', items('For_Each_Orphan')?['NewestSystemAlertId'])}"
+                                                },
+                                                "Link_Alert_To_Orphan_Incident": {
+                                                    "type": "ApiConnection",
+                                                    "runAfter": {
+                                                        "Compose_Orphan_Alert_Arm_Id": ["Succeeded"]
+                                                    },
+                                                    "inputs": {
+                                                        "host": {
+                                                            "connection": {
+                                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                            }
+                                                        },
+                                                        "method": "post",
+                                                        "path": "/Incidents/Relation/Create",
+                                                        "body": {
+                                                            "incidentArmId": "@{outputs('Compose_Orphan_Incident_Arm_Id')}",
+                                                            "relatedResourceId": "@{outputs('Compose_Orphan_Alert_Arm_Id')}"
+                                                        },
+                                                        "retryPolicy": {
+                                                            "type": "fixed",
+                                                            "count": 3,
+                                                            "interval": "PT10S"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "Handle_Failure": {
+                            "type": "Compose",
+                            "runAfter": {
+                                "Main_Scope": ["Failed", "Skipped", "TimedOut"]
+                            },
+                            "inputs": {
+                                "message": "Halcyon-AlertsSync playbook failed.",
+                                "scopeStatus": "@result('Main_Scope')",
+                                "runId": "@workflow().run.name",
+                                "workflowName": "@workflow().name"
+                            }
+                        },
+                        "Terminate_With_Failure": {
+                            "type": "Terminate",
+                            "runAfter": {
+                                "Handle_Failure": ["Succeeded"]
+                            },
+                            "inputs": {
+                                "runStatus": "Failed",
+                                "runError": {
+                                    "code": "MainScopeFailed",
+                                    "message": "@{string(outputs('Handle_Failure'))}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName')), resourceId('Microsoft.Logic/workflows', parameters('PlaybookName')), variables('sentinelContributorRoleId'))]",
+            "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Logic/workflows', parameters('PlaybookName'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('sentinelContributorRoleId'))]",
+                "principalId": "[reference(resourceId('Microsoft.Logic/workflows', parameters('PlaybookName')), '2019-05-01', 'Full').identity.principalId]",
+                "principalType": "ServicePrincipal"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName')), resourceId('Microsoft.Logic/workflows', parameters('PlaybookName')), variables('logAnalyticsReaderRoleId'))]",
+            "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Logic/workflows', parameters('PlaybookName'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('logAnalyticsReaderRoleId'))]",
+                "principalId": "[reference(resourceId('Microsoft.Logic/workflows', parameters('PlaybookName')), '2019-05-01', 'Full').identity.principalId]",
+                "principalType": "ServicePrincipal"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName')), resourceId('Microsoft.Logic/workflows', parameters('PlaybookName')), variables('monitoringReaderRoleId'))]",
+            "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Logic/workflows', parameters('PlaybookName'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('monitoringReaderRoleId'))]",
+                "principalId": "[reference(resourceId('Microsoft.Logic/workflows', parameters('PlaybookName')), '2019-05-01', 'Full').identity.principalId]",
+                "principalType": "ServicePrincipal"
+            }
+        }
+    ]
+}

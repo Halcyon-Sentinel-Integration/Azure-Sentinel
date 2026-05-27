@@ -7,8 +7,7 @@
         }
     },
     "variables": {
-        "analyticsRuleId": "6c11a3f6-d237-4646-9910-724ba40ff803",
-        "automationRuleId": "a78f9a1e-7c47-4ce4-8214-c3fdace2fc62"
+        "analyticsRuleId": "6c11a3f6-d237-4646-9910-724ba40ff803"
     },
     "resources": [
         {
@@ -19,10 +18,10 @@
             "apiVersion": "2023-12-01-preview",
             "properties": {
                 "displayName": "Halcyon - New Alert Detected",
-                "description": "Creates one Sentinel incident per new Halcyon alert. Deduplicates using an anti-join on SecurityAlert to skip already-processed alerts.",
+                "description": "Emits one SecurityAlert per new Halcyon alert with entity mappings. Does NOT create incidents — incident creation is handled by the Halcyon-AlertProcessor playbook.",
                 "severity": "High",
                 "enabled": true,
-                "query": "Halcyon_Commands_CL\n| where TimeGenerated > ago(5m)\n| summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n| join kind=leftanti (\n    Halcyon_Commands_CL\n    | where TimeGenerated between (ago(48h) .. ago(5m))\n    | summarize by HalcyonAlertId\n) on HalcyonAlertId\n| join kind=leftanti (\n    SecurityAlert\n    | where TimeGenerated > ago(14d)\n    | where AlertName has \"Halcyon\"\n    | extend CustomDetails = parse_json(tostring(parse_json(tostring(ExtendedProperties))[\"Custom Details\"]))\n    | extend HalcyonAlertId = tostring(CustomDetails[\"HalcyonAlertId\"][0])\n    | where isnotempty(HalcyonAlertId)\n    | project HalcyonAlertId\n) on HalcyonAlertId\n| extend AlertKind = tostring(finding_info[\"title\"])\n| extend FileHashAlgorithm = tostring(evidences[0][\"file\"][\"hashes\"][0][\"algorithm\"])\n| extend FileHashValue = tostring(evidences[0][\"file\"][\"hashes\"][0][\"value\"])",
+                "query": "Halcyon_Commands_CL\n| where TimeGenerated > ago(7m)\n| join kind=leftanti (_GetWatchlist('HalcyonProcessedIds') | project HalcyonAlertId) on HalcyonAlertId\n| join kind=leftanti (\n    SecurityAlert\n    | where TimeGenerated > ago(14d)\n    | where AlertName has \"Halcyon\"\n    | extend CustomDetails = parse_json(tostring(parse_json(tostring(ExtendedProperties))[\"Custom Details\"]))\n    | extend HalcyonAlertId = tostring(CustomDetails[\"HalcyonAlertId\"][0])\n    | where isnotempty(HalcyonAlertId)\n    | project HalcyonAlertId\n) on HalcyonAlertId\n| extend AlertType = tostring(parse_json(tostring(finding_info)).analytic.name)\n| extend EvidencesParsed = parse_json(tostring(evidences))\n| extend DeviceParsed = parse_json(tostring(device))\n| extend Evidence0 = EvidencesParsed[0]\n| extend Evidence1 = EvidencesParsed[1]\n| extend File1Name = tostring(Evidence0.file.name)\n| extend File2Name = tostring(Evidence1.file.name)\n| extend Hash0 = Evidence0.file.hashes[0]\n| extend Hash1 = Evidence1.file.hashes[0]\n| extend FileHashRawAlgorithm = coalesce(tostring(Hash0.algorithm), tostring(Hash1.algorithm))\n| extend FileHashRawValue = coalesce(tostring(Hash0.value), tostring(Hash1.value))\n| extend FileHashAlgorithm = case(\n    FileHashRawAlgorithm == \"SHA-256\", \"SHA256\",\n    FileHashRawAlgorithm == \"Authenticode\", \"SHA256AC\",\n    \"\"\n)\n| extend FileHashValue = iff(FileHashAlgorithm == \"\", \"\", FileHashRawValue)\n| extend HostName = iff(AlertType == \"BruteForceAttempt\", tostring(DeviceParsed.hostname), \"\")\n| extend DstEndpointUid = tostring(Evidence0.dst_endpoint.uid)\n| extend DstEndpointSubnetUid = tostring(Evidence0.dst_endpoint.subnet_uid)\n| extend IsCidr = DstEndpointSubnetUid matches regex @\"^(\\d{1,3}\\.){3}\\d{1,3}/\\d{1,2}$\"\n| extend IsBareIp = DstEndpointUid matches regex @\"^(\\d{1,3}\\.){3}\\d{1,3}$\"\n| extend IsSlash32 = DstEndpointSubnetUid endswith \"/32\"\n| extend CidrMask = iff(IsCidr, extract(@\"/(\\d{1,2})$\", 1, DstEndpointSubnetUid), \"\")\n| extend CidrNetwork = iff(IsCidr, extract(@\"^((\\d{1,3}\\.){3}\\d{1,3})/\", 1, DstEndpointSubnetUid), \"\")\n| extend IPAddress = case(\n    IsBareIp, DstEndpointUid,\n    IsSlash32, CidrNetwork,\n    IsCidr, CidrNetwork,\n    \"\"\n)\n| extend IPAddressScope = iff(IsCidr and not(IsSlash32), strcat(\"/\", CidrMask), \"\")\n| extend DNSDomainName = iff(\n    AlertType == \"NefariousPeer\"\n        and not(DstEndpointUid contains \"*\")\n        and not(DstEndpointUid contains \"/\")\n        and not(IsBareIp),\n    DstEndpointUid,\n    \"\"\n)\n| summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n| project\n    TimeGenerated,\n    HalcyonAlertId,\n    AlertType,\n    File1Name,\n    File2Name,\n    FileHashAlgorithm,\n    FileHashValue,\n    HostName,\n    IPAddress,\n    IPAddressScope,\n    DNSDomainName,\n    HalcyonTriageStatus,\n    HalcyonDisplayStatus,\n    message,\n    finding_info,\n    evidences,\n    device,\n    HalcyonSourceTime",
                 "queryFrequency": "PT5M",
                 "queryPeriod": "PT47H",
                 "triggerOperator": "GreaterThan",
@@ -48,15 +47,12 @@
                     }
                 ],
                 "incidentConfiguration": {
-                    "createIncident": true,
+                    "createIncident": false,
                     "groupingConfiguration": {
-                        "enabled": true,
+                        "enabled": false,
                         "reopenClosedIncident": false,
-                        "lookbackDuration": "P7D",
-                        "matchingMethod": "Selected",
-                        "groupByEntities": [],
-                        "groupByAlertDetails": [],
-                        "groupByCustomDetails": ["HalcyonAlertId"]
+                        "lookbackDuration": "PT1H",
+                        "matchingMethod": "AllEntities"
                     }
                 },
                 "eventGroupingSettings": {
@@ -64,7 +60,9 @@
                 },
                 "customDetails": {
                     "HalcyonAlertId": "HalcyonAlertId",
-                    "AlertKind": "AlertKind"
+                    "HalcyonTriageStatus": "HalcyonTriageStatus",
+                    "HalcyonDisplayStatus": "HalcyonDisplayStatus",
+                    "AlertType": "AlertType"
                 },
                 "alertDetailsOverride": {
                     "alertDisplayNameFormat": "Halcyon Alert: {{HalcyonAlertId}}",
@@ -73,63 +71,45 @@
                 },
                 "entityMappings": [
                     {
+                        "entityType": "File",
+                        "fieldMappings": [
+                            { "identifier": "Name", "columnName": "File1Name" }
+                        ]
+                    },
+                    {
+                        "entityType": "File",
+                        "fieldMappings": [
+                            { "identifier": "Name", "columnName": "File2Name" }
+                        ]
+                    },
+                    {
                         "entityType": "FileHash",
                         "fieldMappings": [
-                            {
-                                "identifier": "Algorithm",
-                                "columnName": "FileHashAlgorithm"
-                            },
-                            {
-                                "identifier": "Value",
-                                "columnName": "FileHashValue"
-                            }
+                            { "identifier": "Algorithm", "columnName": "FileHashAlgorithm" },
+                            { "identifier": "Value", "columnName": "FileHashValue" }
+                        ]
+                    },
+                    {
+                        "entityType": "Host",
+                        "fieldMappings": [
+                            { "identifier": "HostName", "columnName": "HostName" }
+                        ]
+                    },
+                    {
+                        "entityType": "IP",
+                        "fieldMappings": [
+                            { "identifier": "Address", "columnName": "IPAddress" },
+                            { "identifier": "AddressScope", "columnName": "IPAddressScope" }
+                        ]
+                    },
+                    {
+                        "entityType": "DNS",
+                        "fieldMappings": [
+                            { "identifier": "DomainName", "columnName": "DNSDomainName" }
                         ]
                     }
                 ],
                 "sentinelEntitiesMappings": null
-            }
-        },
-        {
-            "id": "[concat(resourceId('Microsoft.OperationalInsights/workspaces/providers', parameters('workspace'), 'Microsoft.SecurityInsights'),'/automationRules/', variables('automationRuleId'))]",
-            "name": "[concat(parameters('workspace'),'/Microsoft.SecurityInsights/', variables('automationRuleId'))]",
-            "type": "Microsoft.OperationalInsights/workspaces/providers/automationRules",
-            "apiVersion": "2023-12-01-preview",
-            "dependsOn": [
-                "[resourceId('Microsoft.OperationalInsights/workspaces/providers/alertRules', parameters('workspace'), 'Microsoft.SecurityInsights', variables('analyticsRuleId'))]"
-            ],
-            "properties": {
-                "displayName": "Halcyon - Tag Incidents",
-                "order": 1,
-                "triggeringLogic": {
-                    "isEnabled": true,
-                    "triggersOn": "Incidents",
-                    "triggersWhen": "Created",
-                    "conditions": [
-                        {
-                            "conditionType": "Property",
-                            "conditionProperties": {
-                                "propertyName": "IncidentRelatedAnalyticRuleIds",
-                                "operator": "Contains",
-                                "propertyValues": [
-                                    "[concat(resourceId('Microsoft.OperationalInsights/workspaces/providers', parameters('workspace'), 'Microsoft.SecurityInsights'),'/alertRules/', variables('analyticsRuleId'))]"
-                                ]
-                            }
-                        }
-                    ]
-                },
-                "actions": [
-                    {
-                        "order": 1,
-                        "actionType": "ModifyProperties",
-                        "actionConfiguration": {
-                            "labels": [
-                                {
-                                    "labelName": "Halcyon"
-                                }
-                            ]
-                        }
-                    }
-                ]
             }
         }
     ]

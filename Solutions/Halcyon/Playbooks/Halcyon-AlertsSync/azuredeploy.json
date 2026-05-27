@@ -479,7 +479,7 @@
                                             },
                                             "foreach": "@body('Run_Update_KQL')?['value']",
                                             "runtimeConfiguration": {
-                                                "concurrency": { "repetitions": 1 }
+                                                "concurrency": { "repetitions": 10 }
                                             },
                                             "actions": {
                                                 "Compose_Incident_Arm_Id": {
@@ -686,33 +686,69 @@
                                                                 }
                                                             }
                                                         },
-                                                        "Update_Incident": {
-                                                            "type": "ApiConnection",
+                                                        "Compose_Desired_Labels_Normalized": {
+                                                            "type": "Compose",
+                                                            "runAfter": {
+                                                                "Compose_Tags_To_Add": ["Succeeded"]
+                                                            },
+                                                            "inputs": "@string(sort(outputs('Compose_Tags_To_Add'), 'Tag'))"
+                                                        },
+                                                        "Compose_Current_Labels_Normalized": {
+                                                            "type": "Compose",
                                                             "runAfter": {
                                                                 "Compose_Tags_To_Remove": ["Succeeded"]
                                                             },
-                                                            "inputs": {
-                                                                "host": {
-                                                                    "connection": {
-                                                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                            "inputs": "@string(sort(body('Compose_Tags_To_Remove'), 'Tag'))"
+                                                        },
+                                                        "Check_Labels_Changed": {
+                                                            "type": "If",
+                                                            "runAfter": {
+                                                                "Compose_Desired_Labels_Normalized": ["Succeeded"],
+                                                                "Compose_Current_Labels_Normalized": ["Succeeded"]
+                                                            },
+                                                            "expression": {
+                                                                "and": [
+                                                                    {
+                                                                        "not": {
+                                                                            "equals": [
+                                                                                "@outputs('Compose_Desired_Labels_Normalized')",
+                                                                                "@outputs('Compose_Current_Labels_Normalized')"
+                                                                            ]
+                                                                        }
                                                                     }
-                                                                },
-                                                                "method": "put",
-                                                                "path": "/Incidents",
-                                                                "body": {
-                                                                    "incidentArmId": "@{outputs('Compose_Incident_Arm_Id')}",
-                                                                    "tagsToAdd": {
-                                                                        "TagsToAdd": "@outputs('Compose_Tags_To_Add')"
-                                                                    },
-                                                                    "tagsToRemove": {
-                                                                        "TagsToRemove": "@body('Compose_Tags_To_Remove')"
+                                                                ]
+                                                            },
+                                                            "actions": {
+                                                                "Update_Incident": {
+                                                                    "type": "ApiConnection",
+                                                                    "runAfter": {},
+                                                                    "inputs": {
+                                                                        "host": {
+                                                                            "connection": {
+                                                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                                            }
+                                                                        },
+                                                                        "method": "put",
+                                                                        "path": "/Incidents",
+                                                                        "body": {
+                                                                            "incidentArmId": "@{outputs('Compose_Incident_Arm_Id')}",
+                                                                            "tagsToAdd": {
+                                                                                "TagsToAdd": "@outputs('Compose_Tags_To_Add')"
+                                                                            },
+                                                                            "tagsToRemove": {
+                                                                                "TagsToRemove": "@body('Compose_Tags_To_Remove')"
+                                                                            }
+                                                                        },
+                                                                        "retryPolicy": {
+                                                                            "type": "fixed",
+                                                                            "count": 3,
+                                                                            "interval": "PT10S"
+                                                                        }
                                                                     }
-                                                                },
-                                                                "retryPolicy": {
-                                                                    "type": "fixed",
-                                                                    "count": 3,
-                                                                    "interval": "PT10S"
                                                                 }
+                                                            },
+                                                            "else": {
+                                                                "actions": {}
                                                             }
                                                         }
                                                     }

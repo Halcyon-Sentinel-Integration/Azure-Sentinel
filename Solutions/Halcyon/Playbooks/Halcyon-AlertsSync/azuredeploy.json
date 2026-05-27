@@ -220,7 +220,7 @@
                                                     "timerange": "Set in query"
                                                 },
                                                 "body": {
-                                                    "query": "SecurityAlert\n| where TimeGenerated > ago(10m)\n| where AlertName has \"Halcyon\"\n| extend CustomDetails = parse_json(tostring(parse_json(tostring(ExtendedProperties))[\"Custom Details\"]))\n| extend HalcyonAlertId = tostring(CustomDetails[\"HalcyonAlertId\"][0])\n| where isnotempty(HalcyonAlertId)\n| summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n| project HalcyonAlertId, SystemAlertId, AlertName, TimeGenerated, Description, AlertSeverity"
+                                                    "query": "let LatestStatus = materialize(\n    Halcyon_Commands_CL\n    | summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n    | project HalcyonAlertId, HalcyonTriageStatus, HalcyonDisplayStatus\n);\nSecurityAlert\n| where TimeGenerated > ago(10m)\n| where AlertName has \"Halcyon\"\n| extend CustomDetails = parse_json(tostring(parse_json(tostring(ExtendedProperties))[\"Custom Details\"]))\n| extend HalcyonAlertId = tostring(CustomDetails[\"HalcyonAlertId\"][0])\n| where isnotempty(HalcyonAlertId)\n| summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n| join kind=inner LatestStatus on HalcyonAlertId\n| project HalcyonAlertId, SystemAlertId, AlertName, TimeGenerated, Description, AlertSeverity, HalcyonTriageStatus, HalcyonDisplayStatus"
                                                 },
                                                 "retryPolicy": {
                                                     "type": "fixed",
@@ -311,57 +311,49 @@
                                                                 }
                                                             }
                                                         },
-                                                        "Create_Incident": {
-                                                            "type": "Http",
+                                                        "Check_Should_Create_Incident": {
+                                                            "type": "If",
                                                             "runAfter": {
                                                                 "Add_To_Watchlist": ["Succeeded"]
                                                             },
-                                                            "inputs": {
-                                                                "method": "PUT",
-                                                                "uri": "@{concat(parameters('armEndpoint'), 'subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/incidents/', outputs('Compose_Alert_Guid'), '?api-version=2024-03-01')}",
-                                                                "headers": {
-                                                                    "Content-Type": "application/json"
-                                                                },
-                                                                "body": {
-                                                                    "properties": {
-                                                                        "title": "@{concat('Halcyon Alert: ', items('Foreach_Result')?['HalcyonAlertId'])}",
-                                                                        "description": "@{items('Foreach_Result')?['Description']}",
-                                                                        "severity": "High",
-                                                                        "status": "New",
-                                                                        "labels": "@outputs('Compose_Labels')"
+                                                            "expression": {
+                                                                "and": [
+                                                                    {
+                                                                        "equals": [
+                                                                            "@items('Foreach_Result')?['HalcyonTriageStatus']",
+                                                                            "New"
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "equals": [
+                                                                            "@items('Foreach_Result')?['HalcyonDisplayStatus']",
+                                                                            "Visible"
+                                                                        ]
                                                                     }
-                                                                },
-                                                                "authentication": {
-                                                                    "type": "ManagedServiceIdentity",
-                                                                    "audience": "@{parameters('armEndpoint')}"
-                                                                },
-                                                                "retryPolicy": {
-                                                                    "type": "fixed",
-                                                                    "count": 3,
-                                                                    "interval": "PT10S"
-                                                                }
-                                                            }
-                                                        },
-                                                        "Link_Alert_Scope": {
-                                                            "type": "Scope",
-                                                            "runAfter": {
-                                                                "Create_Incident": ["Succeeded"]
+                                                                ]
                                                             },
                                                             "actions": {
-                                                                "Link_Alert_To_Incident": {
-                                                                    "type": "ApiConnection",
+                                                                "Create_Incident": {
+                                                                    "type": "Http",
                                                                     "runAfter": {},
                                                                     "inputs": {
-                                                                        "host": {
-                                                                            "connection": {
-                                                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                                        "method": "PUT",
+                                                                        "uri": "@{concat(parameters('armEndpoint'), 'subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/incidents/', outputs('Compose_Alert_Guid'), '?api-version=2024-03-01')}",
+                                                                        "headers": {
+                                                                            "Content-Type": "application/json"
+                                                                        },
+                                                                        "body": {
+                                                                            "properties": {
+                                                                                "title": "@{concat('Halcyon Alert: ', items('Foreach_Result')?['HalcyonAlertId'])}",
+                                                                                "description": "@{items('Foreach_Result')?['Description']}",
+                                                                                "severity": "High",
+                                                                                "status": "New",
+                                                                                "labels": "@outputs('Compose_Labels')"
                                                                             }
                                                                         },
-                                                                        "method": "post",
-                                                                        "path": "/Incidents/Relation/Create",
-                                                                        "body": {
-                                                                            "incidentArmId": "@{concat('/subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/incidents/', outputs('Compose_Alert_Guid'))}",
-                                                                            "relatedResourceId": "@{concat('/subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/entities/', items('Foreach_Result')?['SystemAlertId'])}"
+                                                                        "authentication": {
+                                                                            "type": "ManagedServiceIdentity",
+                                                                            "audience": "@{parameters('armEndpoint')}"
                                                                         },
                                                                         "retryPolicy": {
                                                                             "type": "fixed",
@@ -369,7 +361,40 @@
                                                                             "interval": "PT10S"
                                                                         }
                                                                     }
+                                                                },
+                                                                "Link_Alert_Scope": {
+                                                                    "type": "Scope",
+                                                                    "runAfter": {
+                                                                        "Create_Incident": ["Succeeded"]
+                                                                    },
+                                                                    "actions": {
+                                                                        "Link_Alert_To_Incident": {
+                                                                            "type": "ApiConnection",
+                                                                            "runAfter": {},
+                                                                            "inputs": {
+                                                                                "host": {
+                                                                                    "connection": {
+                                                                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                                                    }
+                                                                                },
+                                                                                "method": "post",
+                                                                                "path": "/Incidents/Relation/Create",
+                                                                                "body": {
+                                                                                    "incidentArmId": "@{concat('/subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/incidents/', outputs('Compose_Alert_Guid'))}",
+                                                                                    "relatedResourceId": "@{concat('/subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('resourceGroupName'), '/providers/Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'), '/providers/Microsoft.SecurityInsights/entities/', items('Foreach_Result')?['SystemAlertId'])}"
+                                                                                },
+                                                                                "retryPolicy": {
+                                                                                    "type": "fixed",
+                                                                                    "count": 3,
+                                                                                    "interval": "PT10S"
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
                                                                 }
+                                                            },
+                                                            "else": {
+                                                                "actions": {}
                                                             }
                                                         }
                                                     },
@@ -406,7 +431,7 @@
                                                     "timerange": "Set in query"
                                                 },
                                                 "body": {
-                                                    "query": "let SettledAlerts = materialize(\n    Halcyon_Commands_CL\n    | summarize FirstSeen = min(TimeGenerated) by HalcyonAlertId\n    | where FirstSeen < ago(15m)\n);\nlet LatestStatus = materialize(\n    Halcyon_Commands_CL\n    | where TimeGenerated > ago(15m)\n    | where HalcyonAlertId in (SettledAlerts | project HalcyonAlertId)\n    | summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n    | project HalcyonAlertId, HalcyonTriageStatus, HalcyonDisplayStatus\n);\nlet HalcyonAlerts = materialize(\n    SecurityAlert\n    | where TimeGenerated > ago(24h)\n    | where AlertName has \"Halcyon\"\n    | extend CustomDetails = parse_json(tostring(parse_json(tostring(ExtendedProperties))[\"Custom Details\"]))\n    | extend HalcyonAlertId = tostring(CustomDetails[\"HalcyonAlertId\"][0])\n    | where isnotempty(HalcyonAlertId)\n    | summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n    | project HalcyonAlertId, NewestSystemAlertId = SystemAlertId\n);\nSecurityIncident\n| where Labels has_cs \"Halcyon\"\n| summarize arg_max(TimeGenerated, *) by IncidentNumber\n| where Status != \"Closed\"\n| extend CurrentlyLinkedAlertId = tostring(AlertIds[0])\n| join kind=inner (\n    SecurityAlert\n    | where AlertName has \"Halcyon\"\n    | extend CustomDetails = parse_json(tostring(parse_json(tostring(ExtendedProperties))[\"Custom Details\"]))\n    | extend HalcyonAlertId = tostring(CustomDetails[\"HalcyonAlertId\"][0])\n    | project SystemAlertId, HalcyonAlertId\n) on $left.CurrentlyLinkedAlertId == $right.SystemAlertId\n| join kind=inner HalcyonAlerts on HalcyonAlertId\n| join kind=inner LatestStatus on HalcyonAlertId\n| project\n    IncidentId = IncidentName,\n    HalcyonAlertId,\n    CurrentlyLinkedAlertId,\n    NewestSystemAlertId,\n    NeedsAlertSwap = (CurrentlyLinkedAlertId != NewestSystemAlertId),\n    HalcyonTriageStatus,\n    HalcyonDisplayStatus"
+                                                    "query": "let RecentlyActiveAlertIds = materialize(\n    Halcyon_Commands_CL\n    | where TimeGenerated > ago(7d)\n    | summarize by HalcyonAlertId\n);\nlet LatestStatus = materialize(\n    Halcyon_Commands_CL\n    | summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n    | project HalcyonAlertId, HalcyonTriageStatus, HalcyonDisplayStatus\n);\nlet HalcyonAlerts = materialize(\n    SecurityAlert\n    | where TimeGenerated > ago(7d)\n    | where AlertName has \"Halcyon\"\n    | extend CustomDetails = parse_json(tostring(parse_json(tostring(ExtendedProperties))[\"Custom Details\"]))\n    | extend HalcyonAlertId = tostring(CustomDetails[\"HalcyonAlertId\"][0])\n    | where isnotempty(HalcyonAlertId)\n    | summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n    | project HalcyonAlertId, NewestSystemAlertId = SystemAlertId\n);\nSecurityIncident\n| where Labels has_cs \"Halcyon\"\n| summarize arg_max(TimeGenerated, *) by IncidentNumber\n| extend IsClosed = (Status == \"Closed\")\n| extend CurrentlyLinkedAlertId = tostring(AlertIds[0])\n| join kind=inner (\n    SecurityAlert\n    | where AlertName has \"Halcyon\"\n    | extend CustomDetails = parse_json(tostring(parse_json(tostring(ExtendedProperties))[\"Custom Details\"]))\n    | extend HalcyonAlertId = tostring(CustomDetails[\"HalcyonAlertId\"][0])\n    | project SystemAlertId, HalcyonAlertId\n) on $left.CurrentlyLinkedAlertId == $right.SystemAlertId\n| where HalcyonAlertId in (RecentlyActiveAlertIds | project HalcyonAlertId)\n| join kind=leftouter HalcyonAlerts on HalcyonAlertId\n| join kind=inner LatestStatus on HalcyonAlertId\n| project\n    IncidentId = IncidentName,\n    HalcyonAlertId,\n    IsClosed,\n    CurrentlyLinkedAlertId,\n    NewestSystemAlertId,\n    NeedsAlertSwap = iff(IsClosed or isempty(NewestSystemAlertId), false, CurrentlyLinkedAlertId != NewestSystemAlertId),\n    HalcyonTriageStatus,\n    HalcyonDisplayStatus"
                                                 },
                                                 "retryPolicy": {
                                                     "type": "fixed",
@@ -425,7 +450,7 @@
                                                     {
                                                         "greater": [
                                                             "@length(body('Run_Update_KQL')?['value'])",
-                                                            100
+                                                            500
                                                         ]
                                                     }
                                                 ]
@@ -438,7 +463,7 @@
                                                         "runStatus": "Failed",
                                                         "runError": {
                                                             "code": "TooManyRows",
-                                                            "message": "@{concat('KQL returned ', length(body('Run_Update_KQL')?['value']), ' rows — circuit breaker tripped (limit 100). Investigate for duplicate data before re-enabling.')}"
+                                                            "message": "@{concat('KQL returned ', length(body('Run_Update_KQL')?['value']), ' rows — circuit breaker tripped (limit 500). Investigate for duplicate data before re-enabling.')}"
                                                         }
                                                     }
                                                 }
@@ -478,6 +503,14 @@
                                                                             "@items('For_Each_Alert')?['NeedsAlertSwap']",
                                                                             true
                                                                         ]
+                                                                    },
+                                                                    {
+                                                                        "not": {
+                                                                            "equals": [
+                                                                                "@items('For_Each_Alert')?['IsClosed']",
+                                                                                true
+                                                                            ]
+                                                                        }
                                                                     }
                                                                 ]
                                                             },
@@ -538,7 +571,7 @@
                                                                                 },
                                                                                 "retryPolicy": {
                                                                                     "type": "fixed",
-                                                                                    "count": 3,
+                                                                                    "count": 1,
                                                                                     "interval": "PT10S"
                                                                                 }
                                                                             }
@@ -571,7 +604,7 @@
                                                                         },
                                                                         "retryPolicy": {
                                                                             "type": "fixed",
-                                                                            "count": 3,
+                                                                            "count": 1,
                                                                             "interval": "PT10S"
                                                                         }
                                                                     }
@@ -700,6 +733,14 @@
                                                                             "@items('For_Each_Alert')?['HalcyonTriageStatus']",
                                                                             "Reviewed"
                                                                         ]
+                                                                    },
+                                                                    {
+                                                                        "not": {
+                                                                            "equals": [
+                                                                                "@items('For_Each_Alert')?['IsClosed']",
+                                                                                true
+                                                                            ]
+                                                                        }
                                                                     }
                                                                 ]
                                                             },
@@ -760,7 +801,7 @@
                                                     "timerange": "Set in query"
                                                 },
                                                 "body": {
-                                                    "query": "let HalcyonAlerts = materialize(\n    SecurityAlert\n    | where TimeGenerated > ago(24h)\n    | where AlertName has \"Halcyon\"\n    | extend CustomDetails = parse_json(tostring(parse_json(tostring(ExtendedProperties))[\"Custom Details\"]))\n    | extend HalcyonAlertId = tostring(CustomDetails[\"HalcyonAlertId\"][0])\n    | where isnotempty(HalcyonAlertId)\n    | summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n    | project HalcyonAlertId, NewestSystemAlertId = SystemAlertId\n);\nSecurityIncident\n| where Labels has_cs \"Halcyon\"\n| summarize arg_max(TimeGenerated, *) by IncidentNumber\n| where Status != \"Closed\"\n| where array_length(AlertIds) == 0\n| extend HalcyonAlertId = extract(@\"Halcyon Alert: ([0-9a-f]{64})\", 1, Title)\n| where isnotempty(HalcyonAlertId)\n| join kind=inner HalcyonAlerts on HalcyonAlertId\n| project IncidentId = IncidentName, HalcyonAlertId, NewestSystemAlertId"
+                                                    "query": "let HalcyonAlerts = materialize(\n    SecurityAlert\n    | where TimeGenerated > ago(7d)\n    | where AlertName has \"Halcyon\"\n    | extend CustomDetails = parse_json(tostring(parse_json(tostring(ExtendedProperties))[\"Custom Details\"]))\n    | extend HalcyonAlertId = tostring(CustomDetails[\"HalcyonAlertId\"][0])\n    | where isnotempty(HalcyonAlertId)\n    | summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n    | project HalcyonAlertId, NewestSystemAlertId = SystemAlertId\n);\nSecurityIncident\n| where Labels has_cs \"Halcyon\"\n| summarize arg_max(TimeGenerated, *) by IncidentNumber\n| where Status != \"Closed\"\n| where array_length(AlertIds) == 0\n| extend HalcyonAlertId = extract(@\"Halcyon Alert: ([0-9a-f]{64})\", 1, Title)\n| where isnotempty(HalcyonAlertId)\n| join kind=inner HalcyonAlerts on HalcyonAlertId\n| project IncidentId = IncidentName, HalcyonAlertId, NewestSystemAlertId"
                                                 },
                                                 "retryPolicy": {
                                                     "type": "fixed",

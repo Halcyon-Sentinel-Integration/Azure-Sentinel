@@ -1,0 +1,19 @@
+{
+    "type": "Microsoft.OperationalInsights/workspaces/tables",
+    "apiVersion": "2025-07-01",
+    "name": "HalcyonAlertUpdates_CL",
+    "location": "{{location}}",
+    "tags": {},
+    "properties": {
+        "plan": "Analytics",
+        "schema": {
+            "name": "HalcyonAlertUpdates_CL",
+            "columns": [
+                {
+                    "name": "TimeGenerated",
+                    "type": "datetime"
+                }
+            ]
+        }
+    }
+}

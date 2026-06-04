@@ -134,6 +134,10 @@
                     "type": "dynamic"
                 },
                 {
+                    "name": "traffic",
+                    "type": "dynamic"
+                },
+                {
                     "name": "query",
                     "type": "dynamic"
                 },

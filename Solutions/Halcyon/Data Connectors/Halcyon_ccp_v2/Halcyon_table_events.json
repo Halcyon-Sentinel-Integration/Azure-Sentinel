@@ -1,13 +1,13 @@
 {
     "type": "Microsoft.OperationalInsights/workspaces/tables",
     "apiVersion": "2025-07-01",
-    "name": "HalcyonEvents_CL",
+    "name": "HalcyonEventsV2_CL",
     "location": "{{location}}",
     "tags": {},
     "properties": {
-        "plan": "Analytics",
+        "plan": "Basic Logs",
         "schema": {
-            "name": "HalcyonEvents_CL",
+            "name": "HalcyonEventsV2_CL",
             "columns": [
                 {
                     "name": "TimeGenerated",
@@ -148,6 +148,10 @@
                 {
                     "name": "app",
                     "type": "dynamic"
+                },
+                {
+                    "name": "HalcyonEventId",
+                    "type": "string"
                 },
                 {
                     "name": "HalcyonSourceTime",

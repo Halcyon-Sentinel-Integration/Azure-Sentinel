@@ -70,7 +70,7 @@
                     "type": "string"
                 },
                 {
-                    "name": "raw_data",
+                    "name": "raw_record",
                     "type": "string"
                 },
                 {

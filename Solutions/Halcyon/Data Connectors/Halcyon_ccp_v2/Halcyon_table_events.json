@@ -62,6 +62,10 @@
                     "type": "string"
                 },
                 {
+                    "name": "raw_record",
+                    "type": "string"
+                },
+                {
                     "name": "status_id",
                     "type": "int"
                 },

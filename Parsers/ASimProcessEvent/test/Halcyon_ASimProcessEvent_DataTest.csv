@@ -1,0 +1,4 @@
+﻿Result
+"(1) Warning: Empty value in 501 records (50.1%)  in mandatory field [TargetProcessCommandLine] (Schema:ProcessEvent)"
+"(2) Info: Empty value in 1000 records (100.0%)  in optional field [DvcFQDN] (Schema:ProcessEvent)"
+"(2) Info: Empty value in 1000 records (100.0%)  in recommended field [DvcDomain] (Schema:ProcessEvent)"

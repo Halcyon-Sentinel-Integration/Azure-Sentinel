@@ -36,6 +36,7 @@ Parsers:
   - _ASim_FileEvent_MicrosoftSecurityEvents
   - _ASim_FileEvent_Native
   - _ASim_FileEvent_SentinelOne
+  - _ASim_FileEvent_Halcyon
   - _ASim_FileEvent_VMwareCarbonBlackCloud
   - _ASim_FileEvent_GoogleWorkspace
   - _ASim_FileEvent_AWSCloudTrail
@@ -59,6 +60,7 @@ ParserQuery: |
     ASimFileEventMicrosoftSecurityEvents(disabled=(ASimBuiltInDisabled or ('ExcludeASimFileEventMicrosoftSecurityEvents' in (DisabledParsers) ))),
     ASimFileEventNative(disabled=(ASimBuiltInDisabled or ('ExcludeASimFileEventNative' in (DisabledParsers) ))),
     ASimFileEventSentinelOne(disabled=(ASimBuiltInDisabled or ('ExcludeASimFileEventSentinelOne' in (DisabledParsers) ))),
+    ASimFileEventHalcyon(disabled=(ASimBuiltInDisabled or ('ExcludeASimFileEventHalcyon' in (DisabledParsers) ))),
     ASimFileEventVMwareCarbonBlackCloud(disabled=(ASimBuiltInDisabled or ('ExcludeASimFileEventVMwareCarbonBlackCloud' in (DisabledParsers) ))),
     ASimFileEventGoogleWorkspace(disabled=(ASimBuiltInDisabled or ('ExcludeASimFileEventGoogleWorkspace' in (DisabledParsers) ))),
     ASimFileEventAWSCloudTrail(disabled=(ASimBuiltInDisabled or ('ExcludeASimFileEventAWSCloudTrail' in (DisabledParsers) )), pack)

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-08-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "Workspace": {
+      "type": "string",
+      "metadata": {
+        "description": "The Microsoft Sentinel workspace into which the function will be deployed. Has to be in the selected Resource Group."
+      }
+    },
+    "WorkspaceRegion": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "The region of the selected workspace. The default value will use the Region selection above."
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/savedSearches",
+      "apiVersion": "2020-08-01",
+      "name": "[concat(parameters('Workspace'), '/ASimNetworkSessionHalcyon')]",
+      "location": "[parameters('WorkspaceRegion')]",
+      "properties": {
+        "etag": "*",
+        "displayName": "Network Session ASIM parser for Halcyon",
+        "category": "ASIM",
+        "FunctionAlias": "ASimNetworkSessionHalcyon",
+        "query": "let parser = (disabled:bool=false) {\n    HalcyonEventsV2_CL\n    | where not(disabled)\n        and class_uid == 4001                                    // OCSF Network Activity (4001 only; DNS 4003 handled separately)\n    | extend\n        SrcHostname_raw = tostring(src_endpoint.hostname),       // OCSF maps asset -> src_endpoint (no separate device object for 4001)\n        DvcId           = tostring(src_endpoint.uid),\n        DstIpAddr       = tostring(dst_endpoint.ip),             // populated only for peer-reputation events; empty for outbound-volume events\n        SrcIpAddr       = tostring(src_endpoint.ip),             // not emitted by Halcyon 4001 today; future-proofed (empty for now)\n        _bytes_out      = tolong(traffic.bytes_out),             // populated only for outbound-volume events\n        _dur_secs       = toreal(traffic['timespan'].duration_secs),// populated only for outbound-volume events ('timespan' bracketed - reserved KQL keyword)\n        SrcProcessId    = tostring(actor.process.pid),           // actor.process = connection initiator (the source process)\n        SrcProcessName  = tostring(actor.process.file.path),\n        SrcUsername     = tostring(actor.['user'].name),\n        SrcUserId       = tostring(actor.['user'].uid),\n        EventOriginalSeverity = tostring(severity)\n    | invoke _ASIM_ResolveDvcFQDN('SrcHostname_raw')\n    | extend\n        NetworkBytes = _bytes_out,\n        SrcBytes     = _bytes_out,                               // bytes_out is source-originated (outbound) volume\n        NetworkDuration = iff(isnull(_dur_secs), int(null), toint(_dur_secs * 1000)),   // seconds -> milliseconds\n        EventStartTime = coalesce(HalcyonSourceTime, TimeGenerated)\n    | extend\n        Duration     = NetworkDuration,\n        EventEndTime = iff(isnull(_dur_secs), EventStartTime, EventStartTime + (_dur_secs * 1s)),\n        Dst          = DstIpAddr,\n        SrcHostname  = DvcHostname,\n        Src          = coalesce(SrcIpAddr, DvcHostname),        // prefer IP if Halcyon emits it later; falls back to resolved hostname (== SrcHostname; referenced directly as SrcHostname is assigned in this same extend)\n        IpAddr       = SrcIpAddr,                               // required ASIM alias of SrcIpAddr\n        Hostname     = DvcHostname,\n        SrcDvcId     = DvcId,\n        SrcDvcIdType = iff(isnotempty(DvcId), \"Other\", \"\"),\n        DvcIdType    = iff(isnotempty(DvcId), \"Other\", \"\"),\n        Dvc          = coalesce(DvcId, DvcHostname),\n        // Both event types in this class are outbound by definition (egress volume and peer-reputation egress).\n        NetworkDirection = \"Outbound\",\n        // Security verdict drives EventResult/DvcAction, NOT status_id. Block (action_id 2) => Failure/Deny, Report (action_id 1) => Success/Allow.\n        // NetworkSession DvcAction enum has no \"Block\"; \"Deny\" is the enforced-block value (matches CiscoASA convention).\n        EventResult = case(action_id == 2, \"Failure\", action_id == 1, \"Success\", \"NA\"),\n        DvcAction   = case(action_id == 2, \"Deny\", action_id == 1, \"Allow\", \"\"),\n        EventResultDetails = \"NA\",                              // NetworkSession enum has no \"Other\"; \"NA\" = no network-level result reason (verdict is in EventResult/DvcAction)\n        EventSeverity = case(\n                            EventOriginalSeverity in~ (\"Informational\", \"Info\"), \"Informational\",\n                            EventOriginalSeverity =~ \"Low\", \"Low\",\n                            EventOriginalSeverity =~ \"Medium\", \"Medium\",\n                            EventOriginalSeverity in~ (\"High\", \"Critical\", \"Fatal\"), \"High\",\n                            EventOriginalSeverity =~ \"Unknown\", \"Informational\",\n                            \"Informational\"),\n        Process          = SrcProcessName,\n        User             = SrcUsername,\n        SrcUsernameType  = _ASIM_GetUsernameType(tostring(actor.['user'].name)),\n        SrcUserType      = _ASIM_GetUserType(tostring(actor.['user'].name), \"\"),\n        SrcUserIdType    = case(isempty(tostring(actor.['user'].uid)), \"\", tostring(actor.['user'].uid) startswith \"S-1-\", \"SID\", \"Other\")\n    | extend\n        EventCount   = int(1),\n        EventUid     = HalcyonEventId,\n        EventOriginalUid = HalcyonEventId,\n        EventMessage = tostring(message),\n        EventOriginalType = tostring(type_name),\n        EventOriginalSubType = tostring(activity_name),\n        EventProduct = \"Halcyon\",\n        EventVendor  = \"Halcyon\",\n        EventSchema  = \"NetworkSession\",\n        EventSchemaVersion = \"0.2.7\",\n        EventType    = \"EndpointNetworkSession\",\n        AdditionalFields = bag_pack(\n                              \"halcyon_alert_id\",   tostring(unmapped.halcyon_alert_id),\n                              \"halcyon_tenant_id\",  tostring(unmapped.halcyon_tenant_id),\n                              \"halcyon_event_kind\", tostring(unmapped.halcyon_event_kind),\n                              \"halcyon_threshold\",  tostring(unmapped.halcyon_threshold),\n                              \"halcyon_dxp_rule\",   tostring(unmapped.halcyon_dxp_rule)\n                          )\n    | project-away SrcHostname_raw, _bytes_out, _dur_secs\n};\nparser(disabled=disabled)",
+        "version": 1,
+        "functionParameters": "disabled:bool=False"
+      }
+    }
+  ]
+}

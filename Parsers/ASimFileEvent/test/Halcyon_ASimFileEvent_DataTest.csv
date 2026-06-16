@@ -1,0 +1,6 @@
+﻿Result
+"(2) Info: Empty value in 1000 records (100.0%)  in optional field [DvcFQDN] (Schema:FileEvent)"
+"(2) Info: Empty value in 1000 records (100.0%)  in recommended field [DvcDomain] (Schema:FileEvent)"
+"(2) Info: Empty value in 1000 records (100.0%)  in recommended field [SrcFilePath] (Schema:FileEvent)"
+"(2) Info: Empty value in 499 records (49.9%)  in optional field [TargetFileExtension] (Schema:FileEvent)"
+"(2) Info: Empty value in 499 records (49.9%)  in optional field [TargetFileSHA256] (Schema:FileEvent)"

@@ -52,6 +52,7 @@ ParserQuery: |
     ASimAuthenticationSalesforceSC  (ASimAuthenticationDisabled or ('ExcludeASimAuthenticationSalesforceSC'  in (DisabledParsers) )),
     ASimAuthenticationVectraXDRAudit  (ASimAuthenticationDisabled or ('ExcludeASimAuthenticationVectraXDRAudit' in (DisabledParsers) )),
     ASimAuthenticationSentinelOne  (ASimAuthenticationDisabled or ('ExcludeASimAuthenticationSentinelOne' in (DisabledParsers) )),
+    ASimAuthenticationHalcyon  (ASimAuthenticationDisabled or ('ExcludeASimAuthenticationHalcyon' in (DisabledParsers) )),
     ASimAuthenticationGoogleWorkspace (ASimAuthenticationDisabled or ('ExcludeASimAuthenticationGoogleWorkspace' in (DisabledParsers) )),
     ASimAuthenticationPaloAltoCortexDataLake  (ASimAuthenticationDisabled or ('ExcludeASimAuthenticationPaloAltoCortexDataLake' in (DisabledParsers) )),
     ASimAuthenticationVMwareCarbonBlackCloud  (ASimAuthenticationDisabled or ('ExcludeASimAuthenticationVMwareCarbonBlackCloud' in (DisabledParsers) )),
@@ -91,6 +92,7 @@ Parsers:
  - _ASim_Authentication_Sudo
  - _ASim_Authentication_VectraXDRAudit
  - _ASim_Authentication_SentinelOne
+ - _ASim_Authentication_Halcyon
  - _ASim_Authentication_PaloAltoCortexDataLake
  - _ASim_Authentication_PaloAltoPanOS
  - _ASim_Authentication_VMwareCarbonBlackCloud

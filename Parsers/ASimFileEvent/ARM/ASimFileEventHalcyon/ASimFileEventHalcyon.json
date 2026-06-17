@@ -1,0 +1,36 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-08-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "Workspace": {
+      "type": "string",
+      "metadata": {
+        "description": "The Microsoft Sentinel workspace into which the function will be deployed. Has to be in the selected Resource Group."
+      }
+    },
+    "WorkspaceRegion": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "The region of the selected workspace. The default value will use the Region selection above."
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/savedSearches",
+      "apiVersion": "2020-08-01",
+      "name": "[concat(parameters('Workspace'), '/ASimFileEventHalcyon')]",
+      "location": "[parameters('WorkspaceRegion')]",
+      "properties": {
+        "etag": "*",
+        "displayName": "File Event ASIM parser for Halcyon",
+        "category": "ASIM",
+        "FunctionAlias": "ASimFileEventHalcyon",
+        "query": "let parser = (disabled:bool=false) {\n    HalcyonEventsV2_CL\n    | where not(disabled)\n        and class_uid == 1001                                    // OCSF File System Activity (class 1001 only)\n    | extend\n        // ASIM FileEvent enum has no Scanned/Tampered/Encrypted; all Halcyon file ops map to FileModified.\n        // folder targets (OCSF file.type_id 2 = FOLDER) -> FolderModified is the precise enum value.\n        EventType  = case(toint(file.type_id) == 2, \"FolderModified\", \"FileModified\"),\n        _ActorPid  = toint(actor.process.pid),\n        _ActorName = tostring(actor.process.name)\n    | extend _ActorIsPlaceholder = (_ActorName =~ \"unknown\" and _ActorPid == -1)   // sentinel/placeholder actor (no acting process in the source event)\n    | extend\n        TargetFileName      = tostring(file.name),\n        TargetFilePath      = tostring(file.path),\n        TargetFileExtension = tostring(file.ext),                              // populated only when the source event includes a file extension\n        TargetFileSHA256    = tostring(file.hashes[0].value),                  // empty when the source event provides no file hash\n        SrcFilePath         = \"\",                                              // Halcyon emits no source/old path\n        ActingProcessId           = iff(_ActorIsPlaceholder, \"\", tostring(actor.process.pid)),\n        ActingProcessName         = iff(_ActorIsPlaceholder, \"\", tostring(actor.process.file.path)),\n        ActingProcessCommandLine  = iff(_ActorIsPlaceholder, \"\", tostring(actor.process.cmd_line)),\n        ActingProcessSHA256       = iff(_ActorIsPlaceholder, \"\", tostring(actor.process.file.hashes[0].value)),\n        ParentProcessId           = iff(_ActorIsPlaceholder, \"\", tostring(actor.process.parent_process.pid)),  // empty when the source event provides no parent process\n        ActorUsername             = tostring(actor.['user'].name),\n        ActorUserId               = tostring(actor.['user'].uid),\n        DvcId                     = tostring(device.uid),\n        DvcHostname_raw           = tostring(device.hostname),\n        EventOriginalSeverity     = tostring(severity)\n    | invoke _ASIM_ResolveDvcFQDN('DvcHostname_raw')\n    | extend\n        TargetFilePathType = iff(isempty(TargetFilePath), \"\", iff(TargetFilePath startswith \"/\", \"Unix\", \"Windows Local\")),\n        Hash       = TargetFileSHA256,\n        HashType   = iff(isnotempty(TargetFileSHA256), \"SHA256\", \"\"),\n        // Security verdict drives EventResult/DvcAction, NOT status_id. Block (action_id 2) => Failure/Block, Report (action_id 1) => Success/Allow.\n        EventResult = case(action_id == 2, \"Failure\", action_id == 1, \"Success\", \"NA\"),\n        DvcAction   = case(action_id == 2, \"Block\", action_id == 1, \"Allow\", \"\"),\n        EventSeverity = case(\n                            EventOriginalSeverity in~ (\"Informational\", \"Info\"), \"Informational\",\n                            EventOriginalSeverity =~ \"Low\", \"Low\",\n                            EventOriginalSeverity =~ \"Medium\", \"Medium\",\n                            EventOriginalSeverity in~ (\"High\", \"Critical\", \"Fatal\"), \"High\",\n                            EventOriginalSeverity =~ \"Unknown\", \"Informational\",\n                            \"Informational\"),\n        ActorUsernameType = _ASIM_GetUsernameType(tostring(actor.['user'].name)),\n        ActorUserType     = _ASIM_GetUserType(tostring(actor.['user'].name), \"\"),\n        ActorUserIdType   = case(isempty(tostring(actor.['user'].uid)), \"\", tostring(actor.['user'].uid) startswith \"S-1-\", \"SID\", \"Other\"),\n        DvcIdType   = iff(isnotempty(DvcId), \"Other\", \"\"),\n        EventStartTime = coalesce(HalcyonSourceTime, TimeGenerated)\n    | extend\n        Dvc          = coalesce(DvcId, DvcHostname_raw),\n        EventEndTime = EventStartTime,\n        FileName     = TargetFileName,\n        FilePath     = TargetFilePath,\n        Process      = ActingProcessName,\n        User         = ActorUsername,\n        EventCount   = int(1),\n        EventUid     = HalcyonEventId,\n        EventOriginalUid = HalcyonEventId,\n        EventMessage = tostring(message),\n        EventOriginalType = tostring(type_name),\n        EventOriginalSubType = tostring(activity_name),\n        EventProduct = \"Halcyon\",\n        EventVendor  = \"Halcyon\",\n        EventSchema  = \"FileEvent\",\n        EventSchemaVersion = \"0.2.2\",\n        AdditionalFields = bag_pack(\n                              \"halcyon_alert_id\",         tostring(unmapped.halcyon_alert_id),\n                              \"halcyon_tenant_id\",        tostring(unmapped.halcyon_tenant_id),\n                              \"halcyon_event_kind\",       tostring(unmapped.halcyon_event_kind),\n                              \"halcyon_exploited_driver\", tostring(unmapped.halcyon_exploited_driver),\n                              \"halcyon_targeted_product\", tostring(unmapped.halcyon_targeted_product),\n                              \"halcyon_sub_type\",         tostring(unmapped.halcyon_sub_type),\n                              \"halcyon_wdac_policy_guid\", tostring(unmapped.halcyon_wdac_policy_guid),\n                              \"halcyon_wdac_reason\",      tostring(unmapped.halcyon_wdac_reason)\n                          )\n    | project-away _ActorPid, _ActorName, _ActorIsPlaceholder, DvcHostname_raw\n};\nparser(disabled=disabled)",
+        "version": 1,
+        "functionParameters": "disabled:bool=False"
+      }
+    }
+  ]
+}

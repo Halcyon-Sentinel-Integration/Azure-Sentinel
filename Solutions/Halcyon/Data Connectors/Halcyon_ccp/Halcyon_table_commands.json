@@ -1,13 +1,13 @@
 {
     "type": "Microsoft.OperationalInsights/workspaces/tables",
     "apiVersion": "2025-07-01",
-    "name": "HalcyonEvents_CL",
+    "name": "Halcyon_Commands_CL",
     "location": "{{location}}",
     "tags": {},
     "properties": {
         "plan": "Analytics",
         "schema": {
-            "name": "HalcyonEvents_CL",
+            "name": "Halcyon_Commands_CL",
             "columns": [
                 {
                     "name": "TimeGenerated",
@@ -38,14 +38,6 @@
                     "type": "string"
                 },
                 {
-                    "name": "severity_id",
-                    "type": "int"
-                },
-                {
-                    "name": "severity",
-                    "type": "string"
-                },
-                {
                     "name": "type_uid",
                     "type": "long"
                 },
@@ -54,7 +46,15 @@
                     "type": "string"
                 },
                 {
-                    "name": "message",
+                    "name": "count",
+                    "type": "int"
+                },
+                {
+                    "name": "severity_id",
+                    "type": "int"
+                },
+                {
+                    "name": "severity",
                     "type": "string"
                 },
                 {
@@ -63,6 +63,10 @@
                 },
                 {
                     "name": "status",
+                    "type": "string"
+                },
+                {
+                    "name": "message",
                     "type": "string"
                 },
                 {
@@ -82,23 +86,11 @@
                     "type": "string"
                 },
                 {
-                    "name": "rcode",
-                    "type": "string"
-                },
-                {
-                    "name": "rcode_id",
-                    "type": "int"
+                    "name": "finding_info",
+                    "type": "dynamic"
                 },
                 {
                     "name": "metadata",
-                    "type": "dynamic"
-                },
-                {
-                    "name": "unmapped",
-                    "type": "dynamic"
-                },
-                {
-                    "name": "actor",
                     "type": "dynamic"
                 },
                 {
@@ -106,43 +98,39 @@
                     "type": "dynamic"
                 },
                 {
-                    "name": "file",
+                    "name": "resources",
                     "type": "dynamic"
                 },
                 {
-                    "name": "process",
+                    "name": "actor",
                     "type": "dynamic"
                 },
                 {
-                    "name": "user",
+                    "name": "observables",
                     "type": "dynamic"
                 },
                 {
-                    "name": "dst_endpoint",
+                    "name": "unmapped",
                     "type": "dynamic"
                 },
                 {
-                    "name": "src_endpoint",
-                    "type": "dynamic"
+                    "name": "HalcyonAlertId",
+                    "type": "string"
                 },
                 {
-                    "name": "query",
-                    "type": "dynamic"
+                    "name": "comment",
+                    "type": "string"
                 },
                 {
-                    "name": "answers",
-                    "type": "dynamic"
+                    "name": "HalcyonDisplayStatus",
+                    "type": "string"
                 },
                 {
-                    "name": "driver",
-                    "type": "dynamic"
+                    "name": "HalcyonTriageStatus",
+                    "type": "string"
                 },
                 {
-                    "name": "module",
-                    "type": "dynamic"
-                },
-                {
-                    "name": "app",
+                    "name": "evidences",
                     "type": "dynamic"
                 },
                 {

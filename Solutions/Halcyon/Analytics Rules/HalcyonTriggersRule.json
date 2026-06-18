@@ -1,0 +1,136 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "workspace": {
+            "type": "String"
+        }
+    },
+    "variables": {
+        "analyticsRuleId": "6c11a3f6-d237-4646-9910-724ba40ff803",
+        "automationRuleId": "a78f9a1e-7c47-4ce4-8214-c3fdace2fc62"
+    },
+    "resources": [
+        {
+            "id": "[concat(resourceId('Microsoft.OperationalInsights/workspaces/providers', parameters('workspace'), 'Microsoft.SecurityInsights'),'/alertRules/', variables('analyticsRuleId'))]",
+            "name": "[concat(parameters('workspace'),'/Microsoft.SecurityInsights/', variables('analyticsRuleId'))]",
+            "type": "Microsoft.OperationalInsights/workspaces/providers/alertRules",
+            "kind": "Scheduled",
+            "apiVersion": "2023-12-01-preview",
+            "properties": {
+                "displayName": "Halcyon - New Alert Detected",
+                "description": "Creates one Sentinel incident per new Halcyon alert. Deduplicates using an anti-join on SecurityAlert to skip already-processed alerts.",
+                "severity": "High",
+                "enabled": true,
+                "query": "Halcyon_Commands_CL\n| where TimeGenerated > ago(5m)\n| summarize arg_max(TimeGenerated, *) by HalcyonAlertId\n| join kind=leftanti (\n    Halcyon_Commands_CL\n    | where TimeGenerated between (ago(48h) .. ago(5m))\n    | summarize by HalcyonAlertId\n) on HalcyonAlertId\n| join kind=leftanti (\n    SecurityAlert\n    | where TimeGenerated > ago(14d)\n    | where AlertName has \"Halcyon\"\n    | extend CustomDetails = parse_json(tostring(parse_json(tostring(ExtendedProperties))[\"Custom Details\"]))\n    | extend HalcyonAlertId = tostring(CustomDetails[\"HalcyonAlertId\"][0])\n    | where isnotempty(HalcyonAlertId)\n    | project HalcyonAlertId\n) on HalcyonAlertId\n| extend AlertKind = tostring(finding_info[\"title\"])\n| extend FileHashAlgorithm = tostring(evidences[0][\"file\"][\"hashes\"][0][\"algorithm\"])\n| extend FileHashValue = tostring(evidences[0][\"file\"][\"hashes\"][0][\"value\"])",
+                "queryFrequency": "PT5M",
+                "queryPeriod": "PT47H",
+                "triggerOperator": "GreaterThan",
+                "triggerThreshold": 0,
+                "suppressionDuration": "PT1H",
+                "suppressionEnabled": false,
+                "startTimeUtc": null,
+                "tactics": [
+                    "Execution",
+                    "Impact"
+                ],
+                "techniques": [
+                    "T1486"
+                ],
+                "subTechniques": [],
+                "alertRuleTemplateName": null,
+                "requiredDataConnectors": [
+                    {
+                        "dataTypes": [
+                            "Halcyon_Commands_CL"
+                        ],
+                        "connectorId": "HalcyonPush"
+                    }
+                ],
+                "incidentConfiguration": {
+                    "createIncident": true,
+                    "groupingConfiguration": {
+                        "enabled": true,
+                        "reopenClosedIncident": false,
+                        "lookbackDuration": "P7D",
+                        "matchingMethod": "Selected",
+                        "groupByEntities": [],
+                        "groupByAlertDetails": [],
+                        "groupByCustomDetails": ["HalcyonAlertId"]
+                    }
+                },
+                "eventGroupingSettings": {
+                    "aggregationKind": "AlertPerResult"
+                },
+                "customDetails": {
+                    "HalcyonAlertId": "HalcyonAlertId",
+                    "AlertKind": "AlertKind"
+                },
+                "alertDetailsOverride": {
+                    "alertDisplayNameFormat": "Halcyon Alert: {{HalcyonAlertId}}",
+                    "alertDescriptionFormat": "{{message}}.\n\nHalcyon detection for alert ID `{{HalcyonAlertId}}`.\n\nTo see related events, run this query in Logs:\n\nHalcyonEvents_CL\n | extend HalcyonAlertId = tostring(parse_json(unmapped)['halcyon_alert_id'])\n | where HalcyonAlertId == '{{HalcyonAlertId}}'",
+                    "alertDynamicProperties": []
+                },
+                "entityMappings": [
+                    {
+                        "entityType": "FileHash",
+                        "fieldMappings": [
+                            {
+                                "identifier": "Algorithm",
+                                "columnName": "FileHashAlgorithm"
+                            },
+                            {
+                                "identifier": "Value",
+                                "columnName": "FileHashValue"
+                            }
+                        ]
+                    }
+                ],
+                "sentinelEntitiesMappings": null
+            }
+        },
+        {
+            "id": "[concat(resourceId('Microsoft.OperationalInsights/workspaces/providers', parameters('workspace'), 'Microsoft.SecurityInsights'),'/automationRules/', variables('automationRuleId'))]",
+            "name": "[concat(parameters('workspace'),'/Microsoft.SecurityInsights/', variables('automationRuleId'))]",
+            "type": "Microsoft.OperationalInsights/workspaces/providers/automationRules",
+            "apiVersion": "2023-12-01-preview",
+            "dependsOn": [
+                "[resourceId('Microsoft.OperationalInsights/workspaces/providers/alertRules', parameters('workspace'), 'Microsoft.SecurityInsights', variables('analyticsRuleId'))]"
+            ],
+            "properties": {
+                "displayName": "Halcyon - Tag Incidents",
+                "order": 1,
+                "triggeringLogic": {
+                    "isEnabled": true,
+                    "triggersOn": "Incidents",
+                    "triggersWhen": "Created",
+                    "conditions": [
+                        {
+                            "conditionType": "Property",
+                            "conditionProperties": {
+                                "propertyName": "IncidentRelatedAnalyticRuleIds",
+                                "operator": "Contains",
+                                "propertyValues": [
+                                    "[concat(resourceId('Microsoft.OperationalInsights/workspaces/providers', parameters('workspace'), 'Microsoft.SecurityInsights'),'/alertRules/', variables('analyticsRuleId'))]"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "actions": [
+                    {
+                        "order": 1,
+                        "actionType": "ModifyProperties",
+                        "actionConfiguration": {
+                            "labels": [
+                                {
+                                    "labelName": "Halcyon"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+    ]
+}

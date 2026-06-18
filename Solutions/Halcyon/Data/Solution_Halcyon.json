@@ -17,9 +17,15 @@
     "Parsers/Halcyon_OCSF_ProcessActivity.yaml"
   ],
   "Workbooks": [],
-  "Analytic Rules": [],
-  "Hunting Queries": [],
-  "Playbooks": [],
+  "Analytic Rules": [
+    "Analytics Rules/HalcyonTriggersRule.json"
+  ],
+  "Hunting Queries": [
+    "Hunting Queries/HalcyonRelatedEvents.yaml"
+  ],
+  "Playbooks": [
+    "Playbooks/Halcyon-IncidentUpdate/azuredeploy.json"
+  ],
   "BasePath": "C:\\GitHub\\Azure-Sentinel\\Solutions\\Halcyon",
   "Version": "3.2.0",
   "Metadata": "SolutionMetadata.json",

@@ -13,6 +13,10 @@
             "type": "datetime"
           },
           {
+            "name": "time",
+            "type": "long"
+          },
+          {
             "name": "activity_id",
             "type": "int"
           },
@@ -45,10 +49,6 @@
             "type": "string"
           },
           {
-            "name": "time",
-            "type": "long"
-          },
-          {
             "name": "type_uid",
             "type": "long"
           },
@@ -58,10 +58,6 @@
           },
           {
             "name": "message",
-            "type": "string"
-          },
-          {
-            "name": "raw_data",
             "type": "string"
           },
           {
@@ -94,6 +90,10 @@
           },
           {
             "name": "rcode_id",
+            "type": "int"
+          },
+          {
+            "name": "count",
             "type": "int"
           },
           {
@@ -151,6 +151,26 @@
           {
             "name": "app",
             "type": "dynamic"
+          },
+          {
+            "name": "finding_info",
+            "type": "dynamic"
+          },
+          {
+            "name": "resources",
+            "type": "dynamic"
+          },
+          {
+            "name": "observables",
+            "type": "dynamic"
+          },
+          {
+            "name": "evidences",
+            "type": "dynamic"
+          },
+          {
+            "name": "comment",
+            "type": "string"
           }
         ]
       }
@@ -171,8 +191,18 @@
         "destinations": [
           "clv2ws1"
         ],
-        "transformKql": "source | extend TimeGenerated = datetime(1970-01-01) + (['time'] * 1ms) | project-away ['time']",
+        "transformKql": "source | where class_uid != 2004 | extend HalcyonSourceTime = datetime(1970-01-01) + (['time'] * 1ms) | project-away finding_info, resources, observables, evidences, comment",
         "outputStream": "Custom-HalcyonEvents_CL"
+      },
+      {
+        "streams": [
+          "Custom-Halcyon"
+        ],
+        "destinations": [
+          "clv2ws1"
+        ],
+        "transformKql": "source | where class_uid == 2004 | extend HalcyonSourceTime = datetime(1970-01-01) + (['time'] * 1ms), HalcyonAlertId = tostring(finding_info.uid), HalcyonDisplayStatus = tostring(parse_json(unmapped).halcyon_display_status), HalcyonTriageStatus = tostring(parse_json(unmapped).halcyon_triage_status) | project-away rcode, rcode_id, file, process, user, dst_endpoint, src_endpoint, query, answers, driver, module, app",
+        "outputStream": "Custom-Halcyon_Commands_CL"
       }
     ]
   }

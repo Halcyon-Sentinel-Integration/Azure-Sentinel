@@ -1,0 +1,36 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-08-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "Workspace": {
+      "type": "string",
+      "metadata": {
+        "description": "The Microsoft Sentinel workspace into which the function will be deployed. Has to be in the selected Resource Group."
+      }
+    },
+    "WorkspaceRegion": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "The region of the selected workspace. The default value will use the Region selection above."
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/savedSearches",
+      "apiVersion": "2020-08-01",
+      "name": "[concat(parameters('Workspace'), '/vimAuthenticationHalcyon')]",
+      "location": "[parameters('WorkspaceRegion')]",
+      "properties": {
+        "etag": "*",
+        "displayName": "Authentication ASIM filtering parser for Halcyon",
+        "category": "ASIM",
+        "FunctionAlias": "vimAuthenticationHalcyon",
+        "query": "let parser = (starttime:datetime=datetime(null), endtime:datetime=datetime(null), username_has_any:dynamic=dynamic([]), targetappname_has_any:dynamic=dynamic([]), srcipaddr_has_any_prefix:dynamic=dynamic([]), srchostname_has_any:dynamic=dynamic([]), eventtype_in:dynamic=dynamic([]), eventresultdetails_in:dynamic=dynamic([]), eventresult:string='*', disabled:bool=false) {\n    HalcyonEventsV2_CL\n    | where not(disabled)\n        and class_uid == 3002                                    // OCSF Authentication\n        and (isnull(starttime) or coalesce(HalcyonSourceTime, TimeGenerated) >= starttime)\n        and (isnull(endtime)   or coalesce(HalcyonSourceTime, TimeGenerated) <= endtime)\n    | extend\n        EventType   = \"Logon\",\n        _filter_name = tostring(unmapped.halcyon_filter_name),\n        EventResult = \"Failure\"\n    | extend EventResultDetails = case(_filter_name in~ (\"IncorrectPasswordAttempts\", \"FailedPassword\"), \"Incorrect password\", \"Other\")\n    // Pushdown filters on raw OCSF fields.\n    // NOTE: targetappname_has_any and srchostname_has_any are not applicable - these authentication\n    // emits no target application name and no source hostname (only a parsed source IP).\n    // ipv4_is_in_any_range used for srcipaddr (clean IP string, not a log haystack) - see vimNetworkSessionHalcyon.\n    | where (array_length(eventtype_in) == 0 or EventType in~ (eventtype_in))\n        and (array_length(eventresultdetails_in) == 0 or EventResultDetails in~ (eventresultdetails_in))\n        and (eventresult == '*' or EventResult =~ eventresult)\n        and array_length(targetappname_has_any) == 0\n        and array_length(srchostname_has_any) == 0\n        and (array_length(username_has_any) == 0 or tostring(user.name) has_any (username_has_any))\n        and (array_length(srcipaddr_has_any_prefix) == 0 or ipv4_is_in_any_range(tostring(src_endpoint.ip), srcipaddr_has_any_prefix))\n    | extend\n        SrcIpAddr      = tostring(src_endpoint.ip),              // parsed from the source log; empty when no parseable value is present\n        TargetUsername = tostring(user.name),                   // attacked account; empty when no regex match\n        TargetUserId   = tostring(user.uid),                    // always empty in the source data\n        TargetDvcId    = tostring(dst_endpoint.uid),            // logon target asset\n        DvcHostname_raw = tostring(dst_endpoint.hostname),\n        EventOriginalSeverity = tostring(severity)\n    | invoke _ASIM_ResolveDvcFQDN('DvcHostname_raw')\n    | extend\n        TargetHostname = DvcHostname,\n        DvcAction   = case(action_id == 2, \"Deny\", action_id == 1, \"Allow\", \"\"),\n        EventSeverity = case(\n                            EventOriginalSeverity in~ (\"Informational\", \"Info\"), \"Informational\",\n                            EventOriginalSeverity =~ \"Low\", \"Low\",\n                            EventOriginalSeverity =~ \"Medium\", \"Medium\",\n                            EventOriginalSeverity in~ (\"High\", \"Critical\", \"Fatal\"), \"High\",\n                            EventOriginalSeverity =~ \"Unknown\", \"Informational\",\n                            \"Informational\"),\n        TargetUsernameType = _ASIM_GetUsernameType(tostring(user.name)),\n        TargetUserIdType   = \"\",\n        TargetDvcIdType    = iff(isnotempty(tostring(dst_endpoint.uid)), \"Other\", \"\"),\n        DvcIdType          = iff(isnotempty(tostring(dst_endpoint.uid)), \"Other\", \"\"),\n        EventStartTime = coalesce(HalcyonSourceTime, TimeGenerated)\n    | extend\n        Dvc          = coalesce(TargetDvcId, DvcHostname),\n        EventEndTime = EventStartTime,\n        User         = TargetUsername,\n        IpAddr       = SrcIpAddr,                                // required ASIM alias of SrcIpAddr\n        Src          = SrcIpAddr,                                // recommended; source identifier (attacker IP, may be empty on regex no-match)\n        Dst          = TargetHostname,                           // recommended; logon-target host\n        EventCount   = int(1),\n        EventUid     = HalcyonEventId,\n        EventOriginalUid = HalcyonEventId,\n        EventMessage = tostring(message),\n        EventOriginalType = tostring(type_name),\n        EventOriginalSubType = tostring(activity_name),\n        EventProduct = \"Halcyon\",\n        EventVendor  = \"Halcyon\",\n        EventSchema  = \"Authentication\",\n        EventSchemaVersion = \"0.1.4\",\n        AdditionalFields = bag_pack(\n                              \"halcyon_alert_id\",    tostring(unmapped.halcyon_alert_id),\n                              \"halcyon_tenant_id\",   tostring(unmapped.halcyon_tenant_id),\n                              \"halcyon_event_kind\",  tostring(unmapped.halcyon_event_kind),\n                              \"halcyon_filter_name\", _filter_name,\n                              \"halcyon_raw_log\",     tostring(raw_data)\n                          )\n    | project-away DvcHostname_raw, _filter_name\n};\nparser(starttime=starttime, endtime=endtime, username_has_any=username_has_any, targetappname_has_any=targetappname_has_any, srcipaddr_has_any_prefix=srcipaddr_has_any_prefix, srchostname_has_any=srchostname_has_any, eventtype_in=eventtype_in, eventresultdetails_in=eventresultdetails_in, eventresult=eventresult, disabled=disabled)",
+        "version": 1,
+        "functionParameters": "starttime:datetime=datetime(null),endtime:datetime=datetime(null),username_has_any:dynamic=dynamic([]),targetappname_has_any:dynamic=dynamic([]),srcipaddr_has_any_prefix:dynamic=dynamic([]),srchostname_has_any:dynamic=dynamic([]),eventtype_in:dynamic=dynamic([]),eventresultdetails_in:dynamic=dynamic([]),eventresult:string='*',disabled:bool=False"
+      }
+    }
+  ]
+}

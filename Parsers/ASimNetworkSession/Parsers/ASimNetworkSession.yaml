@@ -48,6 +48,7 @@ Parsers:
   - _ASim_NetworkSession_BarracudaWAF
   - _ASim_NetworkSession_BarracudaCEF
   - _ASim_NetworkSession_SentinelOne
+  - _ASim_NetworkSession_Halcyon
   - _ASim_NetworkSession_CiscoFirepower
   - _ASim_NetworkSession_CrowdStrikeFalconHost
   - _ASim_NetworkSession_VMwareCarbonBlackCloud
@@ -91,6 +92,7 @@ ParserQuery: |
     , ASimNetworkSessionForcePointFirewall            (ASimBuiltInDisabled or ('ExcludeASimNetworkSessionForcePointFirewall'      in (DisabledParsers) ))
     , ASimNetworkSessionNative                        (ASimBuiltInDisabled or ('ExcludeASimNetworkSessionNative'      in (DisabledParsers) ))
     , ASimNetworkSessionSentinelOne                   (ASimBuiltInDisabled or ('ExcludeASimNetworkSessionSentinelOne'      in (DisabledParsers) ))
+    , ASimNetworkSessionHalcyon                       (ASimBuiltInDisabled or ('ExcludeASimNetworkSessionHalcyon'      in (DisabledParsers) ))
     , ASimNetworkSessionCiscoMeraki                   (ASimBuiltInDisabled or ('ExcludeASimNetworkSessionCiscoMeraki'      in (DisabledParsers) ))
     , ASimNetworkSessionCiscoISE                      (ASimBuiltInDisabled or ('ExcludeASimNetworkSessionCiscoISE'      in (DisabledParsers) ))
     , ASimNetworkSessionBarracudaWAF                  (ASimBuiltInDisabled or ('ExcludeASimNetworkSessionBarracudaWAF'      in (DisabledParsers) ))

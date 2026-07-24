@@ -22,20 +22,17 @@ Description: |
   Note: The HalcyonEventsV2_CL table must be configured on the Log Analytics workspace's Analytics plan to use this parser. The Basic Logs plan does not support invocation of user-defined functions, which is required for ASIM parser consumption.
 Exceptions:
 - Field: DvcFQDN
-  Warning: Empty value in mandatory field
-  Exception: Halcyon Process Activity events provide only a short device hostname (device.hostname); no FQDN is emitted by the source, so DvcFQDN is empty by design.
+  Warning: Empty value in optional field
+  Exception: DvcFQDN is derived when device.hostname is a fully-qualified domain name; when Halcyon emits a short hostname (no domain suffix), DvcFQDN is empty.
 - Field: DvcDomain
-  Warning: Empty value in mandatory field
-  Exception: Halcyon Process Activity events do not emit a device domain; only device.hostname (short) and device.uid are populated. DvcDomain is empty by design.
-- Field: DvcIpAddr
-  Warning: Empty value in mandatory field
-  Exception: Halcyon Process Activity events do not emit a device IP address; device endpoint information is limited to hostname and uid.
+  Warning: Empty value in recommended field
+  Exception: DvcDomain is derived when device.hostname is a fully-qualified domain name; when Halcyon emits a short hostname (no domain suffix), DvcDomain is empty.
 - Field: TargetProcessCreationTime
-  Warning: Empty value in mandatory field
-  Exception: Halcyon Process Activity events represent process launch attempts that may be blocked before execution; a process creation timestamp is not emitted by the source.
+  Warning: Empty value in recommended field
+  Exception: Halcyon's pre-execution blocking detections may prevent the target binary from launching, so a target process creation time is not emitted by the source.
 - Field: TargetProcessCommandLine
   Warning: Empty value in mandatory field
-  Exception: Halcyon's pre-execution blocking detections prevent the target binary from launching, so a command line is not available for the blocked process. The launching process's command line is preserved in ActingProcessCommandLine.
+  Exception: Halcyon's pre-execution blocking detections prevent the target binary from launching, so a command line is not captured for the blocked process; the launching process's command line is preserved in ActingProcessCommandLine.
 ParserName: ASimProcessCreateHalcyon
 EquivalentBuiltInParser: _ASim_ProcessCreate_Halcyon
 ParserParams:
@@ -89,7 +86,7 @@ ParserQuery: |
           DvcIdType   = iff(isnotempty(DvcId), "Other", ""),
           EventStartTime = coalesce(HalcyonSourceTime, TimeGenerated)
       | extend
-          Dvc          = coalesce(DvcId, DvcHostname_raw),
+          Dvc          = coalesce(DvcId, DvcHostname),
           EventEndTime = EventStartTime,
           User         = TargetUsername,
           Process      = TargetProcessName,
@@ -109,6 +106,58 @@ ParserQuery: |
                                 "halcyon_tenant_id",  tostring(unmapped.halcyon_tenant_id),
                                 "halcyon_event_kind", tostring(unmapped.halcyon_event_kind)
                             )
-      | project-away DvcHostname_raw
+      // Project only ASIM ProcessEvent/Common output columns (avoids project-away so new source columns don't leak into output).
+      | project
+          TimeGenerated,
+          Type,
+          EventType,
+          TargetProcessId,
+          TargetProcessName,
+          TargetProcessCommandLine,
+          TargetProcessSHA256,
+          ActingProcessId,
+          ActingProcessName,
+          ActingProcessCommandLine,
+          ActingProcessSHA256,
+          ParentProcessId,
+          ActorUsername,
+          ActorUserId,
+          TargetUsername,
+          TargetUserId,
+          DvcId,
+          EventOriginalSeverity,
+          DvcHostname,
+          DvcFQDN,
+          DvcDomain,
+          DvcDomainType,
+          Hash,
+          HashType,
+          EventResult,
+          DvcAction,
+          EventSeverity,
+          TargetUsernameType,
+          TargetUserType,
+          TargetUserIdType,
+          ActorUsernameType,
+          ActorUserType,
+          ActorUserIdType,
+          DvcIdType,
+          EventStartTime,
+          Dvc,
+          EventEndTime,
+          User,
+          Process,
+          CommandLine,
+          EventCount,
+          EventUid,
+          EventOriginalUid,
+          EventMessage,
+          EventOriginalType,
+          EventOriginalSubType,
+          EventProduct,
+          EventVendor,
+          EventSchema,
+          EventSchemaVersion,
+          AdditionalFields
   };
   parser(disabled=disabled)

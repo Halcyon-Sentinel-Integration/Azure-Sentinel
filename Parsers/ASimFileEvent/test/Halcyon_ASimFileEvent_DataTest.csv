@@ -1,0 +1,11 @@
+﻿Result
+"(1) Warning: Empty value in 4 records (26.67%)  in mandatory field [ActorUsername] (Schema:FileEvent)"
+"(2) Info: Empty value in 2 records (13.33%)  in optional field [DvcFQDN] (Schema:FileEvent)"
+"(2) Info: Empty value in 2 records (13.33%)  in optional field [TargetFileExtension] (Schema:FileEvent)"
+"(2) Info: Empty value in 2 records (13.33%)  in optional field [TargetFileSHA256] (Schema:FileEvent)"
+"(2) Info: Empty value in 2 records (13.33%)  in recommended field [DvcDomain] (Schema:FileEvent)"
+"(2) Info: Empty value in 4 records (26.67%)  in optional field [ActingProcessCommandLine] (Schema:FileEvent)"
+"(2) Info: Empty value in 4 records (26.67%)  in optional field [ActingProcessId] (Schema:FileEvent)"
+"(2) Info: Empty value in 4 records (26.67%)  in optional field [ActingProcessName] (Schema:FileEvent)"
+"(2) Info: Empty value in 4 records (26.67%)  in optional field [ActorUserType] (Schema:FileEvent)"
+"(2) Info: Empty value in 4 records (26.67%)  in recommended field [ActorUserId] (Schema:FileEvent)"

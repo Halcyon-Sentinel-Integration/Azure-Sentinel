@@ -20,6 +20,13 @@ Description: |
   and ingested into the HalcyonEventsV2_CL table in Microsoft Sentinel.
 
   Note: The HalcyonEventsV2_CL table must be configured on the Log Analytics workspace's Analytics plan to use this parser. The Basic Logs plan does not support invocation of user-defined functions, which is required for ASIM parser consumption.
+Exceptions:
+- Field: DvcFQDN
+  Warning: Empty value in optional field
+  Exception: DvcFQDN is derived when device.hostname is a fully-qualified domain name; when Halcyon emits a short hostname (no domain suffix), DvcFQDN is empty.
+- Field: DvcDomain
+  Warning: Empty value in recommended field
+  Exception: DvcDomain is derived when device.hostname is a fully-qualified domain name; when Halcyon emits a short hostname (no domain suffix), DvcDomain is empty.
 ParserName: ASimFileEventHalcyon
 EquivalentBuiltInParser: _ASim_FileEvent_Halcyon
 ParserParams:
@@ -43,7 +50,6 @@ ParserQuery: |
           TargetFilePath      = tostring(file.path),
           TargetFileExtension = tostring(file.ext),                              // populated only when the source event includes a file extension
           TargetFileSHA256    = tostring(file.hashes[0].value),                  // empty when the source event provides no file hash
-          SrcFilePath         = "",                                              // Halcyon emits no source/old path
           ActingProcessId           = iff(_ActorIsPlaceholder, "", tostring(actor.process.pid)),
           ActingProcessName         = iff(_ActorIsPlaceholder, "", tostring(actor.process.file.path)),
           ActingProcessCommandLine  = iff(_ActorIsPlaceholder, "", tostring(actor.process.cmd_line)),
@@ -75,7 +81,7 @@ ParserQuery: |
           DvcIdType   = iff(isnotempty(DvcId), "Other", ""),
           EventStartTime = coalesce(HalcyonSourceTime, TimeGenerated)
       | extend
-          Dvc          = coalesce(DvcId, DvcHostname_raw),
+          Dvc          = coalesce(DvcId, DvcHostname),
           EventEndTime = EventStartTime,
           FileName     = TargetFileName,
           FilePath     = TargetFilePath,
@@ -101,6 +107,53 @@ ParserQuery: |
                                 "halcyon_wdac_policy_guid", tostring(unmapped.halcyon_wdac_policy_guid),
                                 "halcyon_wdac_reason",      tostring(unmapped.halcyon_wdac_reason)
                             )
-      | project-away _ActorPid, _ActorName, _ActorIsPlaceholder, DvcHostname_raw
+      // Project only ASIM FileEvent/Common output columns (avoids project-away so new source columns don't leak into output).
+      | project
+          TimeGenerated,
+          Type,
+          EventType,
+          TargetFileName,
+          TargetFilePath,
+          TargetFileExtension,
+          TargetFileSHA256,
+          ActingProcessId,
+          ActingProcessName,
+          ActingProcessCommandLine,
+          ActorUsername,
+          ActorUserId,
+          DvcId,
+          EventOriginalSeverity,
+          DvcHostname,
+          DvcFQDN,
+          DvcDomain,
+          DvcDomainType,
+          TargetFilePathType,
+          Hash,
+          HashType,
+          EventResult,
+          DvcAction,
+          EventSeverity,
+          ActorUsernameType,
+          ActorUserType,
+          ActorUserIdType,
+          DvcIdType,
+          EventStartTime,
+          Dvc,
+          EventEndTime,
+          FileName,
+          FilePath,
+          Process,
+          User,
+          EventCount,
+          EventUid,
+          EventOriginalUid,
+          EventMessage,
+          EventOriginalType,
+          EventOriginalSubType,
+          EventProduct,
+          EventVendor,
+          EventSchema,
+          EventSchemaVersion,
+          AdditionalFields
   };
   parser(disabled=disabled)

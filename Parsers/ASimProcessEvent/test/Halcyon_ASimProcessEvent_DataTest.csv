@@ -1,0 +1,8 @@
+﻿Result
+"(1) Warning: Empty value in 4 records (26.67%)  in mandatory field [TargetProcessCommandLine] (Schema:ProcessEvent)"
+"(2) Info: Empty value in 2 records (13.33%)  in optional field [DvcFQDN] (Schema:ProcessEvent)"
+"(2) Info: Empty value in 2 records (13.33%)  in recommended field [DvcDomain] (Schema:ProcessEvent)"
+"(2) Info: Empty value in 4 records (26.67%)  in optional field [ActingProcessCommandLine] (Schema:ProcessEvent)"
+"(2) Info: Empty value in 4 records (26.67%)  in optional field [ActingProcessName] (Schema:ProcessEvent)"
+"(2) Info: Empty value in 4 records (26.67%)  in optional field [ActingProcessSHA256] (Schema:ProcessEvent)"
+"(2) Info: Empty value in 4 records (26.67%)  in recommended field [ParentProcessId] (Schema:ProcessEvent)"
